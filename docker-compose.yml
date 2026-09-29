@@ -1,0 +1,64 @@
+version: '3.9' # Compose file version
+
+services: # 컨테이너로 띄울 서비스 목록
+  postgres: # 서비스 이름
+    image: postgres:16 # 사용할 도커 이미지
+    container_name: dev-postgres # 컨테이너 이름
+    restart: unless-stopped # 재시작 정책:
+    ports:
+      - '5432:5432' # 호스트(내 PC) 포트:컨테이너 postgres 포트
+    environment: # 컨테이너 전달할 환경변수
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: devdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck: # 컨테이터 상태 확인 설정
+      test: ['CMD-SHELL', 'pg_isready -U dev -d devdb'] # 컨테이너 안에서 주기적으로 실행할 명령
+      interval: 5s # 5초마다 상태 확인
+      timeout: 3s # 3초안에 응답 없으면 실패로 간주
+      retries: 10 # 최대 10회 재시도
+
+volumes:
+  pgdata:
+# ===========================================
+
+# - docker-compose.yml의 DB환경변수는 초기 생성 시 딱 한번만 적용 (이미지가 초기화 파일을 만들 때)
+# - 같은 볼륨을 쓰면 하나만 유지됨
+# -- volumes에 pgdata라는 네임드 볼륨을 사용했으니, 항상 동일한 DB가 유지됨
+# - 운영환경: 클라우드(managed Postgre DB) / 직접 구성
+# - 개발 환경: 현재 방식 처럼 도커 + pg
+
+# ===========================================
+
+# 네임드볼륨 방식: Postgre 데이터를 도커가 자체적으로 관리하는 저장공간에 보관, 호스트PC에 직접 저장하지 않음
+# services:
+#   volumes:
+#     - pgdata:/var/lib/postgresql/data
+# volumes:
+#  pgdata:
+
+# 호스트 디렉토리 마운트: Postgre 데이터를 호스트PC의 특정 디렉토리에 저장
+# volumes:
+#  - ./local_pgdata:/var/lib/postgresql/data
+
+# ===========================================
+
+# 재시작 정책
+# no: 기본값, 컨테이너가 죽어도 다시 안켜줌
+# always: 컨테이너가 죽으면 무조건 다시 켜줌, Docker 데몬/OS 재시작될 때도 켜줌
+# unless-stopped: 내가 직접 docker stop 한 경우 다시 안 올림, 그 외는 다시 살림
+# on-failure: 컨테이너가 비정상 종료된 경우에만 다시 켜줌
+# 개발환경: unless-stopped
+# 운영환경: always / unless-stopped
+
+# ===========================================
+
+# DB 환경 정보 변수
+# - 프로젝트 루트에 .env 파일 생성 (docker-compose.yml 파일과 동일한 디렉토리에 위치)
+# - docker-compose.yml 파일과 동일한 위치의 .env는 docker compose 가 자동으로 인식
+# ex) :-dev는 기본값 설정
+# environment:
+#   POSTGRES_USER: ${POSTGRES_USER:-dev}
+#   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpass}
+#   POSTGRES_DB: ${POSTGRES_DB:-devdb}
