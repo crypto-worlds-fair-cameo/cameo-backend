@@ -63,7 +63,11 @@ curl http://127.0.0.1:5000/api/samples
 docker compose up -d postgres
 ```
 
-제공된 Compose는 `localhost:5432`, 사용자 `dev`, 비밀번호 `devpass`, DB `devdb`로 설정되어 있습니다. 연결 대상이 다르면 `.env`의 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`을 변경합니다. Compose의 계정·DB 값은 파일에 직접 설정되어 있어 서버 `.env`만 바꿔서는 컨테이너 설정이 바뀌지 않습니다.
+Compose 프로젝트 이름은 `cameo-server`, DB 컨테이너 이름은 `cameo-server-postgres`입니다. NestJS는 로컬에서 실행하며, PostgreSQL 16은 `127.0.0.1:5432`로 연결합니다. 기본 사용자와 DB 이름은 `cameo`입니다. 로컬 개발용 비밀번호는 `.env`의 `DB_PASSWORD`를 확인하세요.
+
+Compose와 서버가 같은 `.env`의 `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`을 사용합니다. 포트가 이미 사용 중이면 `DB_PORT`를 빈 포트로 변경하세요. `.env`는 Git에서 제외되며, 새 환경은 `.env.example`을 복사해 설정합니다.
+
+데이터는 `cameo-server_pgdata` 볼륨에 유지됩니다. 계정·비밀번호·DB 이름은 빈 볼륨의 최초 초기화 때만 적용되므로, 기존 DB의 값을 바꾸려면 SQL로 별도 변경해야 합니다. 기존 다른 Compose 프로젝트의 데이터는 자동 이전되지 않습니다. 스키마 적용은 [DB 안내](db/README.md)를 따릅니다.
 
 `src/app.module.ts`에 다음 import를 추가하고 기존 `imports` 배열에 `DatabaseModule`을 포함합니다.
 
