@@ -1,21 +1,19 @@
-export type BusinessErrorKind =
-  'not_found' | 'validation' | 'forbidden' | 'unauthorized';
-
-type BusinessErrorDefinition = Readonly<{
+export type BusinessErrorDefinition = Readonly<{
+  statusCode: number;
   code: string;
-  kind: BusinessErrorKind;
   message: string;
 }>;
 
-/** 전송 방식과 무관한 업무 실패. message에는 공개 가능한 업무 설명만 담습니다. */
+/** 중앙 오류 정의의 HTTP 상태와 공개 정보를 전달하는 업무 예외입니다. */
 export class BusinessError extends Error {
+  readonly statusCode: number;
   readonly code: string;
-  readonly kind: BusinessErrorKind;
 
+  /** 발생한 업무 실패에 해당하는 중앙 정의로 예외를 생성합니다. */
   constructor(definition: BusinessErrorDefinition) {
     super(definition.message);
     this.name = 'BusinessError';
+    this.statusCode = definition.statusCode;
     this.code = definition.code;
-    this.kind = definition.kind;
   }
 }

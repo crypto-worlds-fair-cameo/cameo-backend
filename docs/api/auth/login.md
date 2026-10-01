@@ -76,7 +76,7 @@ HTTP 200. 신규 가입과 재로그인은 같은 응답을 반환한다.
 
 | 상태 | 코드 | 조건 / 메시지 |
 | --- | --- | --- |
-| 400 | `BadRequestException` | `Content-Type`·본문 누락, 잘못된 매체 타입·charset·필드 형식. |
+| 400 | `BadRequestException` | `Content-Type`·본문 누락, 잘못된 매체 타입·charset·필드 형식. 필드 검증 실패는 검증 내용을 메시지로 전달한다. |
 | 403 | `AUTH_ORIGIN_NOT_ALLOWED` | 출처 누락·비허용 또는 챌린지와 다른 출처. `허용되지 않은 요청 출처입니다.` |
 | 401 | `AUTH_CHALLENGE_INVALID` | 챌린지 없음·만료·사용됨, 연결 쿠키 누락·형식 오류·불일치. `로그인 요청이 유효하지 않습니다. 다시 시도해 주세요.` |
 | 401 | `AUTH_SIGNATURE_INVALID` | 메시지·주소·서명 불일치. `지갑 서명을 확인할 수 없습니다.` |

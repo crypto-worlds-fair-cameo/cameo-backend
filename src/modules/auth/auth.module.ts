@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common';
-import { ChallengeRepository } from './challenge/challenge.repository';
-import { CreateChallengeController } from './create-challenge/create-challenge.controller';
-import { CreateChallengeUseCase } from './create-challenge/create-challenge.use-case';
-import { LoginController } from './login/login.controller';
-import { LoginUseCase } from './login/login.use-case';
-import { WalletAccountRepository } from './wallet-account/wallet-account.repository';
-import { SessionRepository } from './session/session.repository';
-import { MeController } from './me/me.controller';
-import { MeUseCase } from './me/me.use-case';
-import { LogoutController } from './logout/logout.controller';
-import { LogoutUseCase } from './logout/logout.use-case';
+import { ChallengeRepository } from './resources/challenge/challenge.repository';
+import { CreateChallengeController } from './features/create-challenge/create-challenge.controller';
+import { CreateChallengeUseCase } from './features/create-challenge/create-challenge.use-case';
+import { LoginController } from './features/login/login.controller';
+import { LoginUseCase } from './features/login/login.use-case';
+import { WalletAccountRepository } from './resources/wallet-account/wallet-account.repository';
+import { SessionRepository } from './resources/session/session.repository';
+import { MeController } from './features/me/me.controller';
+import { MeUseCase } from './features/me/me.use-case';
+import { LogoutController } from './features/logout/logout.controller';
+import { LogoutUseCase } from './features/logout/logout.use-case';
 
 @Module({
   controllers: [

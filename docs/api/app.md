@@ -22,15 +22,14 @@
   "statusCode": 400,
   "success": false,
   "code": "BadRequestException",
-  "message": "요청 본문을 해석할 수 없습니다.",
-  "error": "Bad Request",
+  "message": "challengeId must be a UUID",
   "traceId": "c9f2ea59-4f07-4b6d-a1b0-eb546ee18265"
 }
 ```
 
 | 상태 | 코드 | 조건 / 메시지 |
 | --- | --- | --- |
-| 400 | `BadRequestException` | 입력 검증·파싱 실패. 메시지는 오류에 따라 달라짐. |
+| 400 | `BadRequestException` | 입력 검증·파싱 실패. Nest 예외의 메시지를 전달하며, 검증 메시지 배열은 쉼표로 합친 문자열이다. 로그인 매체 타입·charset 오류는 `요청 형식이 올바르지 않습니다.`. |
 | 413 | `PayloadTooLargeException` | 본문 크기 등 파서 제한 초과. `요청 본문이 너무 큽니다.` |
 | 415 | `UnsupportedMediaTypeException` | 지원하지 않는 본문 인코딩. `지원하지 않는 본문 인코딩입니다.` |
 | 429 | `ThrottlerException` | 요청 제한 초과. `ThrottlerException: Too Many Requests`. `Retry-After` 제공. |
