@@ -17,7 +17,7 @@ export class ChallengeRepository {
     return result.rows[0].issued_at;
   }
 
-  /** 발급한 입력과 브라우저 연결값의 해시를 호출자의 트랜잭션에 저장한다. */
+  /** 호출자가 선택한 인증 방식·검증용 데이터와 연결값 해시를 같은 트랜잭션에 저장한다. */
   async create(
     challenge: NewChallenge,
     transaction: TransactionContext,
@@ -26,11 +26,12 @@ export class ChallengeRepository {
       `INSERT INTO auth_challenges
          (id, auth_method, nonce, verification_payload, browser_binding_hash,
           created_at, expires_at)
-       VALUES ($1, 'siws', $2, $3::jsonb, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)`,
       [
         challenge.id,
+        challenge.authMethod,
         challenge.nonce,
-        JSON.stringify(challenge.signInInput),
+        JSON.stringify(challenge.verificationPayload),
         challenge.browserBindingHash,
         challenge.createdAt,
         challenge.expiresAt,

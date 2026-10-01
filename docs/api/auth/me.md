@@ -2,12 +2,11 @@
 
 - 상태: 설계 확정, 구현 예정. 현재 제공 중인 API가 아니다.
 - 설계 기준일: 2026-10-01
-- 공통 정책: [Web3 로그인 설계](../../superpowers/specs/2026-10-01-web3-auth-design.md)
 - 경로는 `API_PREFIX=api` 기준이며 경로 접두사를 비우면 `/auth/me`다.
 
 ## 목적과 인증
 
-현재 세션의 서비스 사용자와 세션 만료 시각을 조회한다. 프론트가 새로고침 후 로그인 상태를 복원할 때 사용한다. Phantom의 연결 상태만으로 서비스 로그인 상태를 추정하지 않는다.
+현재 세션의 서비스 사용자와 세션 만료 시각을 조회한다. 프론트가 새로고침 후 로그인 상태를 복원할 때 사용한다. 지갑의 연결 상태만으로 서비스 로그인 상태를 추정하지 않는다.
 
 운영은 `__Host-cameo_session`, 로컬 HTTP는 `cameo_session` 쿠키가 필요하다. Bearer 토큰이나 지갑 주소 쿼리로 인증하지 않는다.
 
@@ -30,7 +29,7 @@ Cookie: __Host-cameo_session=<opaque-session-token>
 
 ## 성공 응답
 
-HTTP 200, `Cache-Control: no-store`. [로그인 응답](sign-in.md)의 `data.user`와 `data.session`과 같은 구조다.
+HTTP 200, `Cache-Control: no-store`. [로그인 응답](login.md)의 `data.user`와 `data.session`과 같은 구조다.
 
 ```json
 {
@@ -67,6 +66,8 @@ HTTP 200, `Cache-Control: no-store`. [로그인 응답](sign-in.md)의 `data.use
 인증에 성공한 조회를 활동으로 계산한다. 본문·쿼리는 조회 대상이나 세션 연장 여부에 영향을 주지 않는다. 인증 가드는 세션을 연장하지 않는다. 유스케이스에서 DB 현재 시각을 `last_seen_at`으로 저장하고 `expires_at=min(현재 시각+7일, absolute_expires_at)`로 갱신한다. 응답의 `expiresAt`은 갱신된 값이며 절대 만료는 유지한다.
 
 같은 토큰을 남은 미접속 만료 기간으로 재발급한다. 운영 쿠키는 HttpOnly, Secure, SameSite=Lax, Path=/, Domain 생략이다. 로컬 HTTP는 환경에 맞는 쿠키 이름과 Secure=false를 사용한다.
+
+쿠키의 `Max-Age`는 DB 만료까지 남은 초를 올림하여 설정한다. 실제 세션 허용 여부는 DB 시각으로 판단하며 현재 시각이 미접속 또는 절대 만료 시각과 같으면 이미 만료된 세션이다.
 
 폐기·만료 확인과 연장은 DB에서 원자적으로 처리한다. 로그아웃과 연장이 경합해도 폐기된 세션을 복구하거나 폐기 시각을 지우지 않는다. DB 저장을 완료한 뒤 사용자와 만료 정보를 반환한다. 이미 만료된 세션은 새 서명 없이 복구하지 않는다.
 

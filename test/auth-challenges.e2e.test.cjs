@@ -207,13 +207,29 @@ describe('로그인 챌린지 HTTP·PostgreSQL 계약', { concurrency: false }, 
         nonce: 'attacker',
         userId: 'another-user',
         signInInput: {},
+        wallet: 'Phantom',
+        provider: 'untrusted-provider',
+        isPhantom: false,
+        authMethod: 'siwe',
+        chainNamespace: 'eip155',
+        verificationPayload: { nonce: 'attacker' },
       },
-      query: '?domain=evil.example&nonce=attacker&unknown[x]=value',
+      query:
+        '?domain=evil.example&nonce=attacker&unknown[x]=value&wallet=Phantom&provider=untrusted-provider&isPhantom=true&authMethod=siwe&chainNamespace=eip155',
     });
     assert.equal(response.status, 201);
     assert.equal(payload.data.signInInput.domain, 'localhost:5173');
+    assert.equal(payload.data.signInInput.chainId, 'mainnet');
     assert.notEqual(payload.data.signInInput.nonce, 'attacker');
     assert.equal(await challengeCount(), 1);
+    const row = (
+      await database.query(
+        `SELECT auth_method, verification_payload FROM "${schema}".auth_challenges WHERE id = $1`,
+        [payload.data.challengeId],
+      )
+    ).rows[0];
+    assert.equal(row.auth_method, 'siws');
+    assert.deepEqual(row.verification_payload, payload.data.signInInput);
   });
 
   it('기준 SQL을 재적용해도 발급한 챌린지와 입력을 유지한다', async () => {

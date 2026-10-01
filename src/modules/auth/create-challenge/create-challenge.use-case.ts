@@ -4,15 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import { BusinessError } from '../../../business-error';
 import type { AllConfigType } from '../../../config/config.type';
 import { TransactionRunner } from '../../../database/transaction/transaction-runner';
-import {
-  AUTH_CHALLENGE_TTL_SECONDS,
-  type SignInInput,
-} from '../challenge/challenge';
+import { AUTH_CHALLENGE_TTL_SECONDS } from '../challenge/challenge';
 import { ChallengeRepository } from '../challenge/challenge.repository';
+import { createSiwsSignInInput, type SiwsSignInInput } from '../siws/siws';
 
 export type CreateChallengeResult = Readonly<{
   challengeId: string;
-  signInInput: SignInInput;
+  signInInput: SiwsSignInInput;
   browserBinding: string;
 }>;
 
@@ -67,22 +65,21 @@ export class CreateChallengeUseCase {
       const expiresAt = new Date(
         createdAt.getTime() + AUTH_CHALLENGE_TTL_SECONDS * 1000,
       );
-      const signInInput: SignInInput = {
-        domain: new URL(origin).host,
-        statement: 'Sign in to Cameo.',
-        uri: `${origin}/`,
-        version: '1',
-        chainId: 'mainnet',
+      const signInInput = createSiwsSignInInput({
+        origin,
+        challengeId,
         nonce,
-        issuedAt: createdAt.toISOString(),
-        expirationTime: expiresAt.toISOString(),
-        requestId: challengeId,
-      };
+        createdAt,
+        expiresAt,
+      });
+
+      // 인증 방식은 서버 정책으로 선택하고, 응답에 반환할 입력을 그대로 저장한다.
       await this.challenges.create(
         {
           id: challengeId,
+          authMethod: 'siws',
           nonce,
-          signInInput,
+          verificationPayload: signInInput,
           browserBindingHash,
           createdAt,
           expiresAt,

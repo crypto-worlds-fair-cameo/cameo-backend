@@ -77,8 +77,9 @@ npm run build
 
 - `src/modules/auth/create-challenge`: 챌린지 발급 컨트롤러·유스케이스
 - `src/modules/auth/challenge`: 챌린지 계약·DB 저장소
+- `src/modules/auth/siws`: Solana SIWS 타입·서명 입력 생성
 - `src/database`: 전역 DB 연결·트랜잭션·준비 상태 확인
 - `src/http`: 공통 응답·오류·검증·요청 제한
 - [챌린지 API 스펙](docs/api/auth/challenges.md)
-- [Web3 로그인 공통 설계](docs/superpowers/specs/2026-10-01-web3-auth-design.md)
+- 구현 예정 API: [로그인](docs/api/auth/login.md), [현재 사용자](docs/api/auth/me.md), [로그아웃](docs/api/auth/logout.md)
 - [공개 운영·샘플 API](docs/api/app.md), [구현 관례](docs/CONVENTION.md)

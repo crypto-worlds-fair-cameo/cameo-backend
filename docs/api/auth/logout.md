@@ -2,7 +2,6 @@
 
 - 상태: 설계 확정, 구현 예정. 현재 제공 중인 API가 아니다.
 - 설계 기준일: 2026-10-01
-- 공통 정책: [Web3 로그인 설계](../../superpowers/specs/2026-10-01-web3-auth-design.md)
 - 경로는 `API_PREFIX=api` 기준이며 경로 접두사를 비우면 `/auth/logout`이다.
 
 ## 목적과 인증
@@ -62,7 +61,7 @@ Set-Cookie: __Host-cameo_auth_binding=; Max-Age=0; Path=/; HttpOnly; Secure; Sam
 
 로컬 HTTP는 `cameo_session`과 `cameo_auth_binding` 이름을 사용하고 Secure를 생략한다. Domain은 환경에 관계없이 생략한다. 브라우저 연결 쿠키 삭제 후 남아 있는 챌린지는 동일 브라우저에서도 새 연결값 없이 사용할 수 없다.
 
-이 API는 서비스 세션을 폐기한다. 프론트의 Phantom 연결 해제는 별도로 수행할 수 있으며, 지갑 연결 해제만으로 서버 세션이 폐기됐다고 표시하지 않는다.
+이 API는 서비스 세션을 폐기한다. 프론트의 지갑 연결 해제는 별도로 수행할 수 있으며, 지갑 연결 해제만으로 서버 세션이 폐기됐다고 표시하지 않는다.
 
 ## 오류 응답과 재시도
 
