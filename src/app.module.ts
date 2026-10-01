@@ -8,7 +8,6 @@ import { DatabaseModule } from './database/database.module';
 import { HttpModule } from './http/http.module';
 import { LoggerModule } from './logging/logger.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { SampleModule } from './modules/sample/sample.module';
 import { SystemModule } from './system/system.module';
 
 @Module({
@@ -21,7 +20,6 @@ import { SystemModule } from './system/system.module';
     HttpModule,
     DatabaseModule,
     SystemModule,
-    SampleModule,
     AuthModule,
   ],
 })

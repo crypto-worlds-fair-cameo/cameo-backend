@@ -2,10 +2,24 @@ import { isUtf8 } from 'node:buffer';
 import { performance } from 'node:perf_hooks';
 import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiHeader,
+  ApiOperation,
+  ApiProperty,
+  ApiTags,
+} from '@nestjs/swagger';
 import { IsString, IsUUID, ValidateBy } from 'class-validator';
 import type { Request, Response } from 'express';
 import { BusinessError } from '@/business-error';
 import { ErrorCodes } from '@/errors/error-codes';
+import { AuthErrorCodes } from '../../../../errors/auth.error-codes';
+import {
+  ApiErrorResponses,
+  ApiSuccessResponse,
+} from '../../../../http/swagger-response';
+import { AuthenticatedSessionResponse } from '../../resources/session/session-http';
 import type { AllConfigType } from '../../../../config/config.type';
 import {
   authCookies,
@@ -37,9 +51,17 @@ function canonicalBase64(
 }
 
 class LoginBody {
+  @ApiProperty({ format: 'uuid', description: '챌린지 발급 응답의 UUID v4.' })
   @IsUUID('4')
   challengeId!: string;
 
+  @ApiProperty({
+    minLength: 32,
+    maxLength: 44,
+    pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$',
+    description: '지갑이 반환한 Solana 주소. 디코딩 시 32바이트여야 합니다.',
+    example: '6xtn9dTbszpUkeqsgaU4oQwSXBPFkGUHdQTaG2Zeoc8L',
+  })
   @IsString()
   @ValidateBy({
     name: 'solanaAddress',
@@ -51,6 +73,12 @@ class LoginBody {
   })
   address!: string;
 
+  @ApiProperty({
+    minLength: 4,
+    maxLength: 5464,
+    description:
+      '지갑이 반환한 원본 UTF-8 메시지(1~4096바이트)의 표준 Base64. 필요한 = 패딩을 포함하며 메시지를 재구성하지 않습니다.',
+  })
   @IsString()
   @ValidateBy({
     name: 'siwsMessage',
@@ -64,6 +92,12 @@ class LoginBody {
   })
   signedMessage!: string;
 
+  @ApiProperty({
+    minLength: 88,
+    maxLength: 88,
+    description:
+      '지갑이 반환한 Ed25519 서명(64바이트)의 표준 Base64. Base64url·공백·줄바꿈은 허용하지 않습니다.',
+  })
   @IsString()
   @ValidateBy({
     name: 'ed25519Signature',
@@ -75,6 +109,7 @@ class LoginBody {
   signature!: string;
 }
 
+@ApiTags('Auth')
 @Controller('auth/login')
 export class LoginController {
   private readonly cookies: ReturnType<typeof authCookies>;
@@ -91,11 +126,35 @@ export class LoginController {
   /** 허용된 DTO 필드만 업무 입력으로 전달하고, 확인된 커밋 후 세션·연결 쿠키를 설정한다. */
   @Post()
   @HttpCode(200)
+  @ApiHeader({
+    name: 'Origin',
+    required: true,
+    description:
+      '챌린지 발급과 동일한 허용 출처. 브라우저가 자동 설정하며 입력값으로 덮어쓸 수 없습니다.',
+    schema: { type: 'string', format: 'uri' },
+  })
+  @ApiOperation({
+    summary: '지갑 로그인',
+    description:
+      '챌린지 발급 출처와 동일한 허용 Origin과 연결 쿠키가 필요합니다. Content-Type은 application/json이며 charset은 utf-8만 허용합니다. 처음 로그인한 지갑은 자동 가입합니다. 챌린지는 한 번만 사용하며 재시도 시 새 챌린지와 서명을 받으세요.',
+  })
+  @ApiBody({ type: LoginBody, required: true })
+  @ApiCookieAuth('challengeBinding')
+  @ApiSuccessResponse(AuthenticatedSessionResponse, {
+    description:
+      '세션 쿠키를 발급하고 연결 쿠키를 삭제합니다. 제출된 기존 세션만 폐기합니다.',
+  })
+  @ApiErrorResponses([
+    AuthErrorCodes.AuthOriginNotAllowed,
+    AuthErrorCodes.AuthChallengeInvalid,
+    AuthErrorCodes.AuthSignatureInvalid,
+    AuthErrorCodes.AuthUserUnavailable,
+  ])
   async create(
     @Body() body: LoginBody,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ) {
+  ): Promise<AuthenticatedSessionResponse> {
     const result = await this.login.execute({
       challengeId: body.challengeId,
       address: body.address,
