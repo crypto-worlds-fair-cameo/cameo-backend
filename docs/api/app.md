@@ -1,53 +1,98 @@
-# Starter HTTP API
+# HTTP API
 
-기본 prefix는 `/api`다. `API_PREFIX=''`이면 prefix 없이 호출한다. 이 문서는 공개 운영·샘플 endpoint를 설명한다. [챌린지 발급](auth/challenges.md)과 [로그인 API](auth/login.md)는 별도 문서에서 관리한다. 프로세스별 IP 요청 제한(기본 60초 100회)이 적용되며 인메모리 샘플 변경은 재시작 시 사라진다.
+기본 경로 접두사는 `/api`다. `API_PREFIX=''`이면 `/api`를 제외한다.
 
-## 공통 계약
+| 메서드 | 경로 | 문서 |
+| --- | --- | --- |
+| POST | `/api/auth/challenges` | [로그인 챌린지 발급](auth/challenges.md) |
+| POST | `/api/auth/login` | [지갑 로그인](auth/login.md) |
+| GET | `/api/auth/me` | [현재 사용자 조회](auth/me.md) |
+| POST | `/api/auth/logout` | [로그아웃](auth/logout.md) |
 
-성공: `{ "statusCode": 200, "success": true, "data": ... }`.
+## 공통 규칙
 
-오류: `{ "statusCode": 400, "success": false, "code": "BadRequestException", "message": "...", "error": "Bad Request", "traceId": "..." }`.
+- 정의되지 않은 쿼리는 무시한다. 본문은 허용 필드만 남겨 검증한다. 입력이 없는 API는 본문·쿼리를 무시한다.
+- 허용 필드의 타입을 자동 변환하지 않는다. 잘못된 JSON 등 HTTP 파싱 오류는 입력을 사용하지 않는 API에서도 거절한다.
+- 날짜는 UTC ISO 8601 문자열이다.
+- 성공 응답은 `statusCode`, `success: true`, `data`를 반환한다.
+- 오류의 `traceId`는 응답 헤더 `x-request-id`와 같다. 초기 파싱 오류에서는 생략될 수 있다.
 
-일반 요청에는 서버 생성 `x-request-id` 응답 헤더가 포함되고 오류의 `traceId`와 연결된다. 클라이언트 request ID를 그대로 신뢰하지 않는다. 부트스트랩 미들웨어 이전의 파싱 실패에서는 ID가 생략될 수 있다.
+```json
+{
+  "statusCode": 400,
+  "success": false,
+  "code": "BadRequestException",
+  "message": "요청 본문을 해석할 수 없습니다.",
+  "error": "Bad Request",
+  "traceId": "c9f2ea59-4f07-4b6d-a1b0-eb546ee18265"
+}
+```
 
-정의되지 않은 쿼리 파라미터는 무시한다. 본문은 DTO에 허용된 필드만 남긴 뒤 검증하며 추가 필드 자체로 400을 반환하지 않는다. 문자열 필드에 숫자·배열·객체를 보내면 자동 문자열 변환 없이 거절한다. 모든 5xx는 공개 `code=INTERNAL_SERVER_ERROR`, `message=Internal server error`, `error=Internal Server Error`로 정리된다.
+| 상태 | 코드 | 조건 / 메시지 |
+| --- | --- | --- |
+| 400 | `BadRequestException` | 입력 검증·파싱 실패. 메시지는 오류에 따라 달라짐. |
+| 413 | `PayloadTooLargeException` | 본문 크기 등 파서 제한 초과. `요청 본문이 너무 큽니다.` |
+| 415 | `UnsupportedMediaTypeException` | 지원하지 않는 본문 인코딩. `지원하지 않는 본문 인코딩입니다.` |
+| 429 | `ThrottlerException` | 요청 제한 초과. `ThrottlerException: Too Many Requests`. `Retry-After` 제공. |
+| 5xx | `INTERNAL_SERVER_ERROR` | 서버 오류. `Internal server error`. |
 
-업무 실패는 기능별로 정의한 공개 `code`와 `message`를 반환한다. 클라이언트는 업무 코드를 기준으로 실패를 구분한다. 업무 오류의 `error`는 `Not Found`, `Bad Request`처럼 HTTP 상태를 설명하는 문자열이며, 입력 형식 검증 실패의 `code`는 `BadRequestException`이다.
+기본 요청 제한은 IP당 60초에 100회다. GET/HEAD `/health`, `/ready`는 제외한다.
 
-한도 초과는 429, `code=ThrottlerException`, `message=ThrottlerException: Too Many Requests`이며 `Retry-After`가 포함된다. 응답의 RateLimit 계열 헤더로 한도를 확인할 수 있다. 기본 저장소는 서버 인스턴스마다 독립적이다. GET/HEAD health·ready는 정확한 경로에 한해 API 한도를 소비하지 않으며, 한도 소진 후에도 호출할 수 있다. API prefix가 적용되고 후행 슬래시와 대소문자는 Express 기본 규칙을 따른다. POST 및 유사 경로는 제외하지 않는다. 429도 전역 오류 필터가 공통 오류 응답을 작성하며 traceId는 x-request-id 응답 헤더와 같다.
+## 인증 공통 규칙
 
-CORS 기본 출처는 `http://localhost:5173`, credentials는 true다. 정확한 HTTP(S) 출처만 설정할 수 있고 운영은 HTTPS가 필요하다. 허용되지 않은 출처에는 접근 허용 헤더가 없다. 챌린지 발급은 CORS와 별개로 요청 출처를 검증해 403을 반환한다.
+- 프론트 요청은 `credentials: 'include'`를 사용한다. CORS 기본 출처는 `http://localhost:5173`이다.
+- 인증 POST 요청은 `Origin`이 필수이며 `CORS_ORIGIN_LIST`의 출처와 정확히 일치해야 한다.
+- 인증 API의 성공·오류 응답은 `Cache-Control: no-store`를 사용한다.
+- 인증 쿠키는 `HttpOnly`, `SameSite=Lax`, `Path=/`, Domain 생략이다. 운영은 `Secure`를 적용한다.
+- 같은 이름의 쿠키가 중복되면 미제출로 처리한다. 쿠키 값은 서버가 관리하며 JSON으로 반환하지 않는다.
+
+| 역할 | 운영 (`NODE_ENV=production`) | 로컬 |
+| --- | --- | --- |
+| 챌린지 연결 | `__Host-cameo_auth_binding` | `cameo_auth_binding` |
+| 로그인 세션 | `__Host-cameo_session` | `cameo_session` |
 
 ## GET /api/health
 
-입력 없음. 200 data: `{ "status": "ok", "timestamp": "2026-09-13T00:00:00.000Z" }`. DB 연결 상태와 독립적인 liveness다.
+인증·입력 없음. 서버 실행 상태를 반환한다. HTTP 200:
+
+```json
+{ "statusCode": 200, "success": true, "data": { "status": "ok", "timestamp": "2026-10-01T03:00:00.000Z" } }
+```
 
 ## GET /api/ready
 
-입력 없음. 200 data: `{ "status": "ok", "database": "up" }`. 실제 DB 쿼리 실패 시 503 공통 서버 오류를 반환한다.
+인증·입력 없음. DB 연결을 확인한다. `database`는 `up` 또는 DB 비활성 시 `disabled`다. 실패하면 503 `INTERNAL_SERVER_ERROR`. HTTP 200:
+
+```json
+{ "statusCode": 200, "success": true, "data": { "status": "ok", "database": "up" } }
+```
 
 ## GET /api/system/info
 
-입력 없음. 200 data: `{ "name": "Nest React Boilerplate", "version": "0.0.1", "environment": "development" }`. 값은 환경 설정을 따른다.
+인증·입력 없음. 환경 설정의 서버 정보를 반환한다. HTTP 200:
+
+```json
+{ "statusCode": 200, "success": true, "data": { "name": "Nest React Boilerplate", "version": "0.0.1", "environment": "development" } }
+```
 
 ## GET /api/samples
 
-선택 query `q: string`. 앞뒤 공백 제거와 소문자 변환 후 name/description에 포함된 샘플을 반환한다. 빈 q는 전체 목록이다. 같은 q를 반복해 배열로 보내거나 알 수 없는 query를 보내면 400이다.
-
-200 data는 아래 항목의 배열이며 일치 항목이 없으면 `[]`다. 정렬·페이지네이션은 제공하지 않는다.
+인증 없음. 선택 쿼리 `q: string`을 공백 제거·소문자 변환 후 이름·설명에서 검색한다. 빈 값이면 전체, 일치 항목이 없으면 `[]`다. `q`에 배열 등 문자열이 아닌 값을 보내면 400이다. 생성 시각 오름차순이며 페이지네이션은 없다. HTTP 200:
 
 ```json
-{ "id": "sample_1", "name": "대시보드 카드 예제", "description": "설명", "createdAt": "2026-09-13T00:00:00.000Z" }
+{ "statusCode": 200, "success": true, "data": [{ "id": "sample_1", "name": "대시보드 카드 예제", "description": "설명", "createdAt": "2026-10-01T03:00:00.000Z" }] }
 ```
+
+샘플의 `id`, `name`, `description`, `createdAt`은 문자열이다. 샘플 변경은 서버 재시작 시 초기화된다.
 
 ## GET /api/samples/:id
 
-필수 path `id: string`. 200 data는 샘플 항목이다. 존재하지 않으면 404, `code=SAMPLE_NOT_FOUND`, `message=샘플 항목을 찾을 수 없습니다.`, `error=Not Found`다.
+인증 없음. 필수 경로 `id: string`. HTTP 200의 `data`는 위 샘플 객체다. 없으면 404 `SAMPLE_NOT_FOUND`, `샘플 항목을 찾을 수 없습니다.`.
 
 ## PATCH /api/samples/:id/name
 
-필수 path `id: string`, JSON body `{ "name": "새 이름" }`. name은 문자열이며 DTO의 최소 길이 2 제약을 적용한다. 저장 전 trim 후에도 2자 이상이어야 한다. 성공 200 data는 변경된 샘플 항목이다. 반복 요청은 해당 이름으로 다시 설정한다.
+인증 없음. 필수 경로 `id: string`, JSON 본문 `{ "name": "새 이름" }`. `name`은 필수 문자열이며 공백 제거 후에도 2자 이상이어야 한다. HTTP 200의 `data`는 변경된 샘플 객체다.
 
-- 입력 타입·길이·추가 필드 오류: 400 `BadRequestException`.
-- trim 후 2자 미만: 400 `SAMPLE_INVALID_NAME`, `message=이름은 공백을 제외하고 2자 이상이어야 합니다.`, `error=Bad Request`.
-- 존재하지 않는 id: 404 `SAMPLE_NOT_FOUND`, `message=샘플 항목을 찾을 수 없습니다.`, `error=Not Found`.
+- 입력 타입·길이 오류: 400 `BadRequestException`.
+- 공백 제거 후 2자 미만: 400 `SAMPLE_INVALID_NAME`, `이름은 공백을 제외하고 2자 이상이어야 합니다.`.
+- 없는 ID: 404 `SAMPLE_NOT_FOUND`, `샘플 항목을 찾을 수 없습니다.`.

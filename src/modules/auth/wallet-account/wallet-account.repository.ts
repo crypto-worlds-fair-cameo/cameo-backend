@@ -58,6 +58,20 @@ export class WalletAccountRepository {
     return { ...user.rows[0], walletId: wallet.rows[0].id };
   }
 
+  /** 세션의 사용자를 잠그고, 대기 중 완료된 계정 상태 변경을 다시 읽는다. */
+  async lockUserById(
+    userId: string,
+    transaction: TransactionContext,
+  ): Promise<Omit<WalletAccount, 'walletId'> | undefined> {
+    const result = await getPgExecutor(this.pool, transaction).query<
+      Omit<WalletAccount, 'walletId'>
+    >(
+      'SELECT id, display_name AS "displayName", avatar_url AS "avatarUrl", status FROM users WHERE id = $1 FOR UPDATE',
+      [userId],
+    );
+    return result.rows[0];
+  }
+
   /** 새 사용자와 최초 지갑을 같은 트랜잭션에 생성한다. 이름 중복은 허용한다. */
   async create(
     identity: WalletIdentity,

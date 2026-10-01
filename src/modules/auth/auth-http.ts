@@ -13,7 +13,7 @@ export function readAuthCookie(
   return cookies?.length === 1 ? cookies[0].slice(prefix.length) : undefined;
 }
 
-/** 챌린지 발급·로그인이 같은 환경별 쿠키 이름과 보안 속성을 사용하게 한다. */
+/** 인증 API가 같은 환경별 쿠키 이름과 보안 속성을 사용하게 한다. */
 export function authCookies(nodeEnv: string): Readonly<{
   bindingName: string;
   sessionName: string;

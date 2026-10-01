@@ -14,6 +14,72 @@ export type SessionLifetime = Readonly<{
 export class SessionRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
+  /** 사용자 잠금을 먼저 얻기 위한 예비 조회다. 이 결과만으로 세션을 인증하지 않는다. */
+  async findOwner(tokenHash: string): Promise<string | undefined> {
+    const result = await this.pool.query<{ user_id: string }>(
+      'SELECT user_id FROM auth_sessions WHERE token_hash = $1',
+      [tokenHash],
+    );
+    return result.rows[0]?.user_id;
+  }
+
+  /** 사용자 잠금 이후 제출 토큰과 사용자에 대응하는 세션을 다시 읽고 잠근다. */
+  async lockForAuthentication(
+    tokenHash: string,
+    userId: string,
+    transaction: TransactionContext,
+  ): Promise<string | undefined> {
+    const result = await getPgExecutor(this.pool, transaction).query<{
+      id: string;
+    }>(
+      'SELECT id FROM auth_sessions WHERE token_hash = $1 AND user_id = $2 FOR UPDATE',
+      [tokenHash, userId],
+    );
+    return result.rows[0]?.id;
+  }
+
+  /** 모든 행 잠금 뒤 DB 시각을 한 번 평가하며, 만료의 정밀도를 DB에서 유지한다. */
+  async inspectAtCurrentTime(
+    sessionId: string,
+    transaction: TransactionContext,
+  ): Promise<Readonly<{ time: Date; usable: boolean }> | undefined> {
+    const result = await getPgExecutor(this.pool, transaction).query<{
+      time: Date;
+      usable: boolean;
+    }>(
+      `WITH check_time AS MATERIALIZED (
+         SELECT date_trunc('milliseconds', clock_timestamp()) AS value
+       )
+       SELECT t.value AS time,
+              (s.revoked_at IS NULL AND t.value < s.expires_at
+               AND t.value < s.absolute_expires_at) AS usable
+       FROM auth_sessions s CROSS JOIN check_time t WHERE s.id = $1`,
+      [sessionId],
+    );
+    return result.rows[0];
+  }
+
+  /** 잠금 뒤 확인한 같은 시각으로 활동을 갱신하며 폐기·절대 만료는 바꾸지 않는다. */
+  async renew(
+    sessionId: string,
+    time: Date,
+    transaction: TransactionContext,
+  ): Promise<SessionLifetime | undefined> {
+    const result = await getPgExecutor(
+      this.pool,
+      transaction,
+    ).query<SessionLifetime>(
+      `UPDATE auth_sessions
+       SET last_seen_at = $2,
+           expires_at = LEAST($2::timestamptz + INTERVAL '7 days', absolute_expires_at)
+       WHERE id = $1 AND revoked_at IS NULL
+         AND $2::timestamptz < expires_at AND $2::timestamptz < absolute_expires_at
+       RETURNING expires_at AS "expiresAt", absolute_expires_at AS "absoluteExpiresAt"`,
+      [sessionId, time],
+    );
+    return result.rows[0];
+  }
+
   /** DB 판정 시각 기준으로 7일·절대 30일 세션을 생성하며 토큰 해시만 저장한다. */
   async create(
     userId: string,
