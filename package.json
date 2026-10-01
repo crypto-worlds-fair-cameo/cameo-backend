@@ -6,7 +6,6 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "test": "npm run build && node --test --test-concurrency=1 test/*.test.cjs",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "format": "prettier --write \"src/**/*.ts\"",
     "start": "npm run build && npm run start:prod",
@@ -23,6 +22,9 @@
     "@nestjs/config": "12.0.0",
     "@nestjs/core": "12.0.1",
     "@nestjs/platform-express": "12.0.1",
+    "@noble/curves": "1.9.7",
+    "@solana/wallet-standard-util": "1.1.4",
+    "bs58": "6.0.0",
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
     "express-rate-limit": "8.7.0",

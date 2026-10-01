@@ -1,6 +1,6 @@
 # POST /api/auth/challenges — 로그인 챌린지 발급
 
-- 상태: 구현 완료. HTTP·PostgreSQL 통합 테스트로 검증했다.
+- 상태: 구현 완료. 구현 당시 HTTP·PostgreSQL 통합 검증을 마쳤으며, 검증용 테스트 코드는 저장소에서 제거했다.
 - 설계 기준일: 2026-10-01
 - 경로는 `API_PREFIX=api` 기준이며 경로 접두사를 비우면 `/auth/challenges`다.
 

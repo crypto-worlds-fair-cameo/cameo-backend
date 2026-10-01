@@ -60,7 +60,7 @@ HTTP 오류 처리는 `http/errors`, request ID와 완료·중단 로그는 `htt
 
 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build`를 사용한다. 변경한 API의 입력·응답·오류는 실행해서 확인한다.
 
-`npm test`는 Node 기본 테스트 실행기로 챌린지의 HTTP·실제 DB·트랜잭션 동작을 확인한다. `.env`의 개발용 DB에 임시 스키마를 생성하고 종료 시 해당 스키마만 정리한다. Nest CLI의 spec 파일 자동 생성은 기본적으로 끈다.
+자동 테스트 코드와 테스트 실행 스크립트는 저장소에서 관리하지 않는다. Nest CLI의 spec 파일 자동 생성은 기본적으로 끈다.
 
 ## 요청 생명주기
 

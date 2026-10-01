@@ -12,6 +12,7 @@ import { ResponseInterceptor } from './http/response.interceptor';
 import validationOptions from './http/validation-options';
 import { LoggerService } from './logging/logger.service';
 import { createAuthCacheControlMiddleware } from './modules/auth/auth-http';
+import { createLoginMediaTypeMiddleware } from './modules/auth/login/login-media-type.middleware';
 
 /** 공통 HTTP 처리를 구성하고 인증 경로의 초기 응답에도 캐시 금지 정책을 적용한다. */
 export function configureApp(app: INestApplication): INestApplication {
@@ -33,6 +34,7 @@ export function configureApp(app: INestApplication): INestApplication {
   app.enableShutdownHooks();
   app.useLogger(logger);
   app.enableCors(createCorsOptions(configService));
+  app.use(createLoginMediaTypeMiddleware(apiPrefix));
   if (apiPrefix) {
     app.setGlobalPrefix(apiPrefix);
   }

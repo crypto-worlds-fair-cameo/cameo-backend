@@ -20,6 +20,7 @@ const businessErrorHttp = {
   not_found: { statusCode: 404, error: 'Not Found' },
   validation: { statusCode: 400, error: 'Bad Request' },
   forbidden: { statusCode: 403, error: 'Forbidden' },
+  unauthorized: { statusCode: 401, error: 'Unauthorized' },
 } satisfies Record<
   BusinessErrorKind,
   Pick<NormalizedError, 'statusCode' | 'error'>

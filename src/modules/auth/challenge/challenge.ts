@@ -16,3 +16,16 @@ export type NewChallenge = Readonly<{
   expiresAt: Date;
 }> &
   ChallengeVerification;
+
+/** 저장 데이터를 읽을 때는 인증 방식과 payload를 신뢰하지 않고 런타임에 검증한다. */
+export type StoredChallenge = Readonly<{
+  id: string;
+  authMethod: string;
+  nonce: string;
+  verificationPayload: unknown;
+  browserBindingHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  consumedAt: Date | null;
+  usable: boolean;
+}>;

@@ -1,24 +1,19 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BusinessError } from '../../../business-error';
 import type { AllConfigType } from '../../../config/config.type';
 import { TransactionRunner } from '../../../database/transaction/transaction-runner';
 import { AUTH_CHALLENGE_TTL_SECONDS } from '../challenge/challenge';
 import { ChallengeRepository } from '../challenge/challenge.repository';
 import { createSiwsSignInInput, type SiwsSignInInput } from '../siws/siws';
+import { assertAuthOrigin } from '../auth-origin';
+import { hashAuthSecret, isAuthSecret } from '../auth-secret';
 
 export type CreateChallengeResult = Readonly<{
   challengeId: string;
   signInInput: SiwsSignInInput;
   browserBinding: string;
 }>;
-
-function isValidBrowserBinding(value: string | undefined): value is string {
-  if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) return false;
-  const bytes = Buffer.from(value, 'base64url');
-  return bytes.length === 32 && bytes.toString('base64url') === value;
-}
 
 @Injectable()
 export class CreateChallengeUseCase {
@@ -40,22 +35,14 @@ export class CreateChallengeUseCase {
     const allowedOrigins = this.config.getOrThrow('cors.originList', {
       infer: true,
     });
-    if (!origin || !allowedOrigins.includes(origin)) {
-      throw new BusinessError({
-        kind: 'forbidden',
-        code: 'AUTH_ORIGIN_NOT_ALLOWED',
-        message: '허용되지 않은 요청 출처입니다.',
-      });
-    }
+    assertAuthOrigin(origin, allowedOrigins);
 
     // 이 값은 이후 서명 요청이 챌린지를 발급받은 브라우저에서 왔는지 확인할 때 쓴다.
     // 기존 값을 유지하면 앞서 발급한 미사용 챌린지도 같은 브라우저에서 사용할 수 있다.
-    const binding = isValidBrowserBinding(browserBinding)
+    const binding = isAuthSecret(browserBinding)
       ? browserBinding
       : randomBytes(32).toString('base64url');
-    const browserBindingHash = createHash('sha256')
-      .update(binding)
-      .digest('hex');
+    const browserBindingHash = hashAuthSecret(binding);
     const challengeId = randomUUID();
     const nonce = randomBytes(32).toString('hex');
 

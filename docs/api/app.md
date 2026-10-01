@@ -1,6 +1,6 @@
 # Starter HTTP API
 
-기본 prefix는 `/api`다. `API_PREFIX=''`이면 prefix 없이 호출한다. 이 문서는 공개 운영·샘플 endpoint를 설명한다. [챌린지 발급 API](auth/challenges.md)는 별도 문서에서 관리한다. 프로세스별 IP 요청 제한(기본 60초 100회)이 적용되며 인메모리 샘플 변경은 재시작 시 사라진다.
+기본 prefix는 `/api`다. `API_PREFIX=''`이면 prefix 없이 호출한다. 이 문서는 공개 운영·샘플 endpoint를 설명한다. [챌린지 발급](auth/challenges.md)과 [로그인 API](auth/login.md)는 별도 문서에서 관리한다. 프로세스별 IP 요청 제한(기본 60초 100회)이 적용되며 인메모리 샘플 변경은 재시작 시 사라진다.
 
 ## 공통 계약
 

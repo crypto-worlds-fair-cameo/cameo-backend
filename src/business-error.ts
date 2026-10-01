@@ -1,4 +1,5 @@
-export type BusinessErrorKind = 'not_found' | 'validation' | 'forbidden';
+export type BusinessErrorKind =
+  'not_found' | 'validation' | 'forbidden' | 'unauthorized';
 
 type BusinessErrorDefinition = Readonly<{
   code: string;
