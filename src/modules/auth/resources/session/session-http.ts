@@ -13,7 +13,13 @@ class AuthenticatedUserResponse {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ type: String, nullable: true, example: '사용자-a7f29c41' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'user-a7f29c41',
+    description:
+      '최초 가입 시 user- 접두사와 무작위 8자리 hex로 자동 생성하는 닉네임.',
+  })
   displayName!: string | null;
 
   @ApiProperty({ type: String, nullable: true, example: null })

@@ -72,7 +72,7 @@ export class WalletAccountRepository {
     return result.rows[0];
   }
 
-  /** 새 사용자와 최초 지갑을 같은 트랜잭션에 생성한다. 이름 중복은 허용한다. */
+  /** 새 사용자와 최초 지갑을 같은 트랜잭션에 생성한다. 자동 생성 닉네임의 중복은 허용한다. */
   async create(
     identity: WalletIdentity,
     time: Date,
@@ -83,7 +83,7 @@ export class WalletAccountRepository {
       `INSERT INTO users (display_name, avatar_url, status, created_at, updated_at)
        VALUES ($1, NULL, 'active', $2, $2)
        RETURNING id, display_name AS "displayName", avatar_url AS "avatarUrl", status`,
-      [`사용자-${randomBytes(4).toString('hex')}`, time],
+      [`user-${randomBytes(4).toString('hex')}`, time],
     );
     const wallet = await executor.query<{ id: string }>(
       `INSERT INTO user_wallets (user_id, chain_namespace, address, address_key, created_at)

@@ -136,7 +136,7 @@ export class LoginController {
   @ApiOperation({
     summary: '지갑 로그인',
     description:
-      '챌린지 발급 출처와 동일한 허용 Origin과 연결 쿠키가 필요합니다. Content-Type은 application/json이며 charset은 utf-8만 허용합니다. 처음 로그인한 지갑은 자동 가입합니다. 챌린지는 한 번만 사용하며 재시도 시 새 챌린지와 서명을 받으세요.',
+      '챌린지 발급 출처와 동일한 허용 Origin과 연결 쿠키가 필요합니다. Content-Type은 application/json이며 charset은 utf-8만 허용합니다. 처음 로그인한 지갑은 user- 접두사와 무작위 8자리 hex로 닉네임을 자동 생성하여 가입합니다. 챌린지는 한 번만 사용하며 재시도 시 새 챌린지와 서명을 받으세요.',
   })
   @ApiBody({ type: LoginBody, required: true })
   @ApiCookieAuth('challengeBinding')
