@@ -15,11 +15,13 @@ export class SessionRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   /** 사용자 잠금을 먼저 얻기 위한 예비 조회다. 이 결과만으로 세션을 인증하지 않는다. */
-  async findOwner(tokenHash: string): Promise<string | undefined> {
-    const result = await this.pool.query<{ user_id: string }>(
-      'SELECT user_id FROM auth_sessions WHERE token_hash = $1',
-      [tokenHash],
-    );
+  async findOwner(
+    tokenHash: string,
+    transaction?: TransactionContext,
+  ): Promise<string | undefined> {
+    const result = await getPgExecutor(this.pool, transaction).query<{
+      user_id: string;
+    }>('SELECT user_id FROM auth_sessions WHERE token_hash = $1', [tokenHash]);
     return result.rows[0]?.user_id;
   }
 

@@ -67,7 +67,7 @@ export function configureApp(app: INestApplication): INestApplication {
         '지갑 로그인: 챌린지 발급 → 지갑의 solana:signIn 호출 → 원본 메시지와 서명을 Base64로 제출 → 현재 사용자 조회.\n\n' +
         '인증은 서버가 발급하는 HttpOnly 쿠키를 사용합니다. 브라우저 요청에는 credentials: include가 필요합니다. ' +
         '쿠키는 SameSite=Lax, Path=/이며 운영 환경에서는 Secure를 적용합니다. 인증 응답은 Cache-Control: no-store를 사용합니다. ' +
-        '인증 POST의 Origin은 CORS_ORIGIN_LIST에 등록되어야 합니다. Swagger에서 실행할 때도 문서 페이지의 출처에 같은 규칙이 적용됩니다. ' +
+        '인증 POST와 사용자 프로필 PATCH의 Origin은 CORS_ORIGIN_LIST에 등록되어야 합니다. Swagger에서 실행할 때도 문서 페이지의 출처에 같은 규칙이 적용됩니다. ' +
         'Origin과 Cookie 헤더는 브라우저가 관리하며 Swagger 입력으로 임의 설정할 수 없습니다.',
     )
     .addCookieAuth(

@@ -22,6 +22,7 @@ export type LoginResult =
       outcome: 'authenticated';
       token: string;
       sessionExpiryDeadline: number;
+      isNewUser: boolean;
       user: Readonly<{
         id: string;
         displayName: string | null;
@@ -125,6 +126,8 @@ export class LoginUseCase {
       // 비활성 계정은 예외를 던지지 않아 소비만 커밋하고, 기존 세션과 활동 시각은 유지한다.
       if (account && account.status !== 'active')
         return { outcome: 'unavailable' };
+      // 잠금 후 조회 결과로 이번 요청의 가입 여부를 정한다. 동일 지갑의 동시 요청은 한 건만 신규다.
+      const isNewUser = !account;
       // 처음 증명된 지갑은 자동 가입하며, 기존 쿠키의 사용자를 계정 연결에 사용하지 않는다.
       account ??= await this.accounts.create(identity, time, transaction);
       await this.accounts.recordLogin(account, time, transaction);
@@ -147,6 +150,7 @@ export class LoginUseCase {
         outcome: 'authenticated',
         token,
         sessionExpiryDeadline,
+        isNewUser,
         user: {
           id: account.id,
           displayName: account.displayName,

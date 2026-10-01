@@ -1,7 +1,7 @@
 import { BusinessError } from '@/business-error';
 import { ErrorCodes } from '@/errors/error-codes';
 
-/** CORS 헤더와 별개로, 업무 처리 전에 명시적으로 허용한 요청 출처인지 확인한다. */
+/** 공개 출처 검증 기능. CORS 헤더와 별개로 세션을 사용하는 쓰기 요청의 허용 출처를 확인한다. */
 export function assertAuthOrigin(
   origin: string | undefined,
   allowedOrigins: readonly string[],

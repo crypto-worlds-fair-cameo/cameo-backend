@@ -5,7 +5,8 @@
 1. `POST /api/auth/challenges`로 서명 입력을 받는다. 서버가 설정한 연결 쿠키를 유지한다.
 2. 응답의 `signInInput`을 지갑의 `solana:signIn`에 그대로 전달한다.
 3. 지갑이 반환한 원본 메시지와 서명을 표준 Base64로 인코딩해 `POST /api/auth/login`에 제출한다.
-4. 이후 `GET /api/auth/me`로 로그인 상태를 확인하고 `POST /api/auth/logout`으로 로그아웃한다.
+4. 로그인 응답의 `isNewUser`로 이번 요청에서 신규 가입했는지 판단한다. 닉네임은 자동 생성되며, 변경하려면 [닉네임 설정](../user/display-name.md)을 호출한다.
+5. 이후 `GET /api/auth/me`로 로그인 상태를 확인하고 `POST /api/auth/logout`으로 로그아웃한다.
 
 브라우저 요청은 `credentials: 'include'`를 사용한다. 인증 POST는 요청 출처가 서버의 허용 목록에 등록되어 있어야 한다. 챌린지는 5분 동안 한 번만 사용할 수 있다.
 

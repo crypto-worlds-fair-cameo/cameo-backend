@@ -1,6 +1,6 @@
 import type { CookieOptions, RequestHandler } from 'express';
 
-/** 같은 이름의 쿠키가 중복되면 값이 같더라도 하나를 임의로 선택하지 않는다. */
+/** 공개 쿠키 읽기 기능. 같은 이름이 중복되면 값이 같더라도 하나를 임의로 선택하지 않는다. */
 export function readAuthCookie(
   cookieHeader: string | undefined,
   cookieName: string,
@@ -13,7 +13,7 @@ export function readAuthCookie(
   return cookies?.length === 1 ? cookies[0].slice(prefix.length) : undefined;
 }
 
-/** 인증 API가 같은 환경별 쿠키 이름과 보안 속성을 사용하게 한다. */
+/** 공개 쿠키 설정 기능. 세션을 사용하는 모듈이 같은 환경별 이름과 보안 속성을 사용하게 한다. */
 export function authCookies(nodeEnv: string): Readonly<{
   bindingName: string;
   sessionName: string;

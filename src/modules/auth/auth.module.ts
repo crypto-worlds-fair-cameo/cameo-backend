@@ -10,6 +10,7 @@ import { MeController } from './features/me/me.controller';
 import { MeUseCase } from './features/me/me.use-case';
 import { LogoutController } from './features/logout/logout.controller';
 import { LogoutUseCase } from './features/logout/logout.use-case';
+import { SessionAuthenticator } from './resources/session/session-authenticator';
 
 @Module({
   controllers: [
@@ -26,6 +27,8 @@ import { LogoutUseCase } from './features/logout/logout.use-case';
     SessionRepository,
     MeUseCase,
     LogoutUseCase,
+    SessionAuthenticator,
   ],
+  exports: [SessionAuthenticator],
 })
 export class AuthModule {}

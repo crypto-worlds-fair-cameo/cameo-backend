@@ -109,6 +109,16 @@ class LoginBody {
   signature!: string;
 }
 
+class LoginResponse extends AuthenticatedSessionResponse {
+  @ApiProperty({
+    type: Boolean,
+    example: true,
+    description:
+      '이번 로그인 요청에서 사용자를 생성했으면 true, 기존 사용자이면 false입니다.',
+  })
+  isNewUser!: boolean;
+}
+
 @ApiTags('Auth')
 @Controller('auth/login')
 export class LoginController {
@@ -136,11 +146,11 @@ export class LoginController {
   @ApiOperation({
     summary: '지갑 로그인',
     description:
-      '챌린지 발급 출처와 동일한 허용 Origin과 연결 쿠키가 필요합니다. Content-Type은 application/json이며 charset은 utf-8만 허용합니다. 처음 로그인한 지갑은 user- 접두사와 무작위 8자리 hex로 닉네임을 자동 생성하여 가입합니다. 챌린지는 한 번만 사용하며 재시도 시 새 챌린지와 서명을 받으세요.',
+      '챌린지 발급 출처와 동일한 허용 Origin과 연결 쿠키가 필요합니다. Content-Type은 application/json이며 charset은 utf-8만 허용합니다. 처음 로그인한 지갑은 user- 접두사와 무작위 8자리 hex로 닉네임을 자동 생성하여 가입합니다. 로그인 후 Users API로 닉네임을 변경할 수 있습니다. 챌린지는 한 번만 사용하며 재시도 시 새 챌린지와 서명을 받으세요.',
   })
   @ApiBody({ type: LoginBody, required: true })
   @ApiCookieAuth('challengeBinding')
-  @ApiSuccessResponse(AuthenticatedSessionResponse, {
+  @ApiSuccessResponse(LoginResponse, {
     description:
       '세션 쿠키를 발급하고 연결 쿠키를 삭제합니다. 제출된 기존 세션만 폐기합니다.',
   })
@@ -154,7 +164,7 @@ export class LoginController {
     @Body() body: LoginBody,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<AuthenticatedSessionResponse> {
+  ): Promise<LoginResponse> {
     const result = await this.login.execute({
       challengeId: body.challengeId,
       address: body.address,
@@ -190,6 +200,10 @@ export class LoginController {
       ...this.cookies.options,
       maxAge: 0,
     });
-    return { user: result.user, session: result.session };
+    return {
+      user: result.user,
+      session: result.session,
+      isNewUser: result.isNewUser,
+    };
   }
 }
