@@ -1,97 +1,31 @@
-```
+# Sample module
+
+현재 샘플은 독립 HTTP 기능과 공유 `sample-item` 책임을 다음처럼 배치합니다.
+
+```text
 sample/
 ├── sample.module.ts
-├── application/
-│   ├── get-sample-by-id.use-case.ts
-│   ├── list-samples.use-case.ts
+├── list-samples/
+│   ├── list-samples.controller.ts
+│   └── list-samples.use-case.ts
+├── get-sample-by-id/
+│   ├── get-sample-by-id.controller.ts
+│   └── get-sample-by-id.use-case.ts
+├── update-sample-name/
+│   ├── update-sample-name.controller.ts
 │   └── update-sample-name.use-case.ts
-├── domain/
-│   ├── sample-error-code.ts
-│   ├── entities/
-│   │   └── sample-item.entity.ts
-│   └── repositories/
-│       ├── sample-command.repository.ts
-│       └── sample-read.repository.ts
-├── infrastructure/
-│   └── persistence/
-│       └── sample.repository.in-memory.ts
-└── presentation/
-    ├── controllers/
-    │   └── sample.controller.ts
-    ├── errors/
-    │   └── sample-http-error.mapper.ts
-    └── dto/
-        ├── update-sample-name.dto.ts
-        └── sample-response.dto.ts
+└── sample-item/
+    ├── sample-item.ts
+    ├── sample.repository.ts
+    └── sample-http.ts
 ```
 
-# Domain
+각 Controller는 같은 폴더의 UseCase를 호출합니다. 작은 요청 DTO는 Controller 파일에 둡니다. `sample-item`은 여러 기능이 함께 바꿔야 하는 샘플 상태, 메모리 저장소, 응답 필드 선택과 업무 오류 정의를 소유합니다.
 
-- 시스템이 다루는 핵심 모델과 규칙을 담는다.
-- DB, HTTP, 외부 API 같은 기술 세부사항과 분리한다.
+`SampleRepository`는 구체 provider 하나로 등록됩니다. 조회 결과와 저장 입력을 복사하고 인스턴스마다 seed를 새로 만들어 외부 변경이나 다른 인스턴스가 내부 상태를 공유하지 않게 합니다. 세 UseCase는 이 provider를 직접 주입받습니다. `SampleModule`은 외부 소비자가 없는 UseCase를 export하지 않습니다.
 
-예시:
+업무 실패는 루트 `business-error.ts`의 `BusinessError({ code, kind, message })`로 전달합니다. `sample-item.ts`의 `SampleErrors`가 공개 업무 코드, 실패 종류와 공개 가능한 메시지를 정의합니다. UseCase는 `new BusinessError(SampleErrors.NotFound)`처럼 발생 지점에서 오류를 생성합니다. 전역 `HttpExceptionFilter`가 실패 종류를 HTTP 상태로 변환하고 업무 코드와 메시지를 응답에 사용하므로, 기능별 mapper나 모듈 등록은 필요하지 않습니다. `sample-http.ts`는 응답 타입과 필드 선택만 담당합니다.
 
-```ts
-import { BusinessError } from '@/common/exceptions/business.error';
-import { SampleErrorCode } from './sample-error-code';
+`./scripts/create-module orders`는 업무 모듈만 생성합니다. `--feature cancel-order`는 한 UseCase를, `--feature get-order --http GET 'orders/:id'`는 UseCase와 Controller를 생성합니다. 기존 module 파일은 자동 수정하지 않으며 CLI가 필요한 등록 코드를 출력합니다.
 
-class SampleItem {
-  changeName(newName: string) {
-    const normalizedName = newName.trim();
-
-    if (normalizedName.length < 2) {
-      throw new BusinessError(
-        SampleErrorCode.InvalidName,
-        '이름은 공백을 제외하고 2자 이상이어야 합니다.',
-      );
-    }
-
-    this.name = normalizedName;
-  }
-}
-```
-
-# Application
-
-- 유저 관점의 기능 흐름을 표현한다.
-- 권한 확인, 도메인 메서드 호출, 저장 순서를 조합한다.
-
-예시:
-
-```ts
-async execute(id: string, newName: string) {
-  const sample = await this.sampleReadRepository.findById(id);
-  if (!sample) {
-    throw new BusinessError(SampleErrorCode.NotFound, '샘플 항목을 찾을 수 없습니다.');
-  }
-
-  sample.changeName(newName);
-  return this.sampleCommandRepository.save(sample);
-}
-```
-
-# Infrastructure
-
-- 도메인 인터페이스를 실제 기술로 구현한다.
-- 지금 샘플은 메모리 저장소를 사용하지만, 필요하면 PostgreSQL, Redis, Elasticsearch 구현을 여기서 교체한다.
-
-# Presentation
-
-- HTTP 요청을 받고 DTO 검증을 수행한 뒤 적절한 use case를 호출한다.
-- 비즈니스 규칙은 직접 담지 않는다.
-
-예시:
-
-```ts
-@Patch(':id/name')
-async updateName(@Param('id') id: string, @Body() body: UpdateSampleNameDto) {
-  const sample = await this.updateSampleNameUseCase.execute(id, body.name);
-  return SampleResponseDto.from(sample);
-}
-```
-
-
-업무 오류는 `BusinessError`로 전달하고, `presentation/errors`의 mapper가 허용된 코드만 HTTP 상태·공개 메시지로 변환합니다. 내부 설명은 공개 응답에 자동으로 노출하지 않습니다. `SampleModule`은 `HttpErrorModule`을 import하고 `SampleHttpErrorMapper`를 provider로 등록한 뒤, 생성자에서 `HttpErrorMapperRegistry.register()`로 연결합니다. 공통 filter는 등록되지 않은 업무 오류를 일반적인 500 응답으로 처리합니다.
-
-`./scripts/create-module order orders`는 동일한 오류 코드·mapper·등록 구조와 strict TypeScript DTO를 생성합니다. 생성한 모듈을 `AppModule`에 추가하고 실제 업무 코드·메시지를 정한 뒤 API 문서와 테스트를 작성합니다. 새 모듈은 `ORDER_NOT_FOUND`처럼 기능 이름을 포함한 오류 코드를 사용합니다.
+scaffold는 미구현 `Error`만 포함합니다. 실제 API를 열기 전에 입력, 인증·권한, 응답, 공개 오류를 요구사항으로 구현하고 API 문서와 실행 동작을 확인합니다. 구조 판단은 로컬에 설치된 `nestjs-feature-first-architecture` 스킬을 따릅니다.

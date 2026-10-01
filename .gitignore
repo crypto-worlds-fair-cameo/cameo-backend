@@ -37,13 +37,14 @@ lerna-debug.log*
 
 # dotenv environment variable files
 .env
-.env.*
-!.env.example
+.env.example
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
 
-# Local database data and backups
-/local_pgdata/
-/db/backups/
-/db/dumps/
+# Local agent skills
+/.agents/skills/
 
 # temp directory
 .temp
