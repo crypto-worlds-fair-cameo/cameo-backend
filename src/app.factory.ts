@@ -12,13 +12,14 @@ import { createRequestLifecycleMiddleware } from './http/request-lifecycle/reque
 import { ResponseInterceptor } from './http/response.interceptor';
 import validationOptions from './http/validation-options';
 import { LoggerService } from './logging/logger.service';
+import { SocketIoAdapter } from './realtime/socket-io.adapter';
 import {
   authCookies,
   createAuthCacheControlMiddleware,
 } from './modules/auth/resources/auth-cookie/auth-http';
 import { createLoginMediaTypeMiddleware } from './modules/auth/features/login/login-media-type.middleware';
 
-/** 공통 HTTP 처리와 공개 Swagger 문서를 구성하고 인증 응답에 캐시 금지를 적용한다. */
+/** HTTP·Swagger와 같은 포트의 관람 소켓을 구성하고 인증 응답에 캐시 금지를 적용한다. */
 export function configureApp(app: INestApplication): INestApplication {
   const configService = app.get<ConfigService<AllConfigType>>(ConfigService);
   const logger = app.get(LoggerService);
@@ -48,6 +49,8 @@ export function configureApp(app: INestApplication): INestApplication {
   app.enableShutdownHooks();
   app.useLogger(logger);
   app.enableCors(createCorsOptions(configService));
+  // WebSocket Upgrade는 HTTP CORS와 별도로 출처와 연결 한도를 검사한다.
+  app.useWebSocketAdapter(new SocketIoAdapter(app));
   app.use(createLoginMediaTypeMiddleware(apiPrefix));
   if (apiPrefix) {
     // Express가 접두사 아래의 404 처리도 올바른 URL 경로에 등록하도록 합니다.

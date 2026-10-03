@@ -14,6 +14,7 @@
     "start:prod": "node --enable-source-maps dist/main.js",
     "lint": "oxlint --deny-warnings src",
     "typecheck": "tsc --noEmit --incremental false",
+    "test:realtime": "npm run build && node --test test/canvas/*.test.cjs",
     "lint:fix": "oxlint --fix src",
     "format:check": "prettier --check \"src/**/*.ts\""
   },
@@ -22,7 +23,9 @@
     "@nestjs/config": "12.0.0",
     "@nestjs/core": "12.0.1",
     "@nestjs/platform-express": "12.0.1",
+    "@nestjs/platform-socket.io": "12.0.1",
     "@nestjs/swagger": "12.0.1",
+    "@nestjs/websockets": "12.0.1",
     "@noble/curves": "1.9.7",
     "@solana/wallet-standard-util": "1.1.4",
     "bs58": "6.0.0",
@@ -33,6 +36,7 @@
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "socket.io": "4.8.3",
     "winston": "3.19.0"
   },
   "devDependencies": {
@@ -44,6 +48,7 @@
     "nodemon": "3.1.14",
     "oxlint": "1.82.0",
     "prettier": "3.9.6",
+    "socket.io-client": "4.8.3",
     "tsc-alias": "1.9.5",
     "typescript": "7.0.2"
   },
