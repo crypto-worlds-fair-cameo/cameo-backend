@@ -20,7 +20,7 @@ export class ConnectCanvasGateway
     this.connections.initialize(namespace);
   }
 
-  handleConnection(socket: CanvasSocket): void {
-    this.connections.connect(socket);
+  async handleConnection(socket: CanvasSocket): Promise<void> {
+    await this.connections.connect(socket);
   }
 }

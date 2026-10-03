@@ -1,4 +1,12 @@
 import type { Namespace, Socket } from 'socket.io';
+import type {
+  AppendStrokeInput,
+  AppendStrokeResult,
+  CanvasAckCallback,
+  CanvasSyncPage,
+  StrokePreview,
+  SyncCanvasInput,
+} from '../canvas-stroke/canvas-stroke';
 
 export const MAIN_CANVAS_ROOM = 'canvas:main';
 
@@ -10,8 +18,10 @@ export type CanvasPresence = {
 export type CanvasConnectionReady = {
   protocolVersion: 1;
   canvasKey: 'main';
-  viewer: { status: 'guest'; userId: null };
-  canDraw: false;
+  viewer:
+    | { status: 'guest'; userId: null }
+    | { status: 'authenticated'; userId: string };
+  canDraw: boolean;
   presence: { connectionCount: number };
 };
 
@@ -23,9 +33,19 @@ export interface CanvasServerEvents {
   'connection:ready': (payload: CanvasConnectionReady) => void;
   'canvas:presence': (payload: CanvasPresence) => void;
   'connection:reset': (payload: CanvasConnectionReset) => void;
+  'stroke:preview': (payload: StrokePreview) => void;
 }
 
-// 이번 단계는 서버 알림 수신만 제공하며, 클라이언트 앱 이벤트는 받지 않는다.
-type CanvasClientEvents = Record<string, never>;
+/** 모든 클라이언트 요청은 성공·거절을 ACK로 확인한다. */
+export interface CanvasClientEvents {
+  'stroke:append': (
+    payload: AppendStrokeInput,
+    ack: CanvasAckCallback<AppendStrokeResult>,
+  ) => void;
+  'canvas:sync': (
+    payload: SyncCanvasInput,
+    ack: CanvasAckCallback<CanvasSyncPage>,
+  ) => void;
+}
 export type CanvasSocket = Socket<CanvasClientEvents, CanvasServerEvents>;
 export type CanvasNamespace = Namespace<CanvasClientEvents, CanvasServerEvents>;

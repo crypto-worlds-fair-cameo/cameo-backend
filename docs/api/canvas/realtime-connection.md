@@ -2,7 +2,7 @@
 
 작성일: 2026-10-02
 
-상태: **관람 연결과 연결 상태 이벤트 구현. 소켓 인증·그리기는 후속 단계다.**
+상태: **관람 연결, 쿠키 기반 소켓 인증, 좌표 전송·방송·메모리 복구 구현.**
 
 연결 이벤트의 계약은 [서버 이벤트 타입](../../../src/modules/canvas/resources/canvas-connections/canvas-events.ts)을 기준으로 한다. HTTP 로그인은 [기존 로그인 가이드](../auth/login.md)를 따른다.
 
@@ -15,7 +15,7 @@
 - `connection:reset`을 받으면 준비 상태를 해제하고 종료 후의 재시도 정책을 확인한다.
 - 실제 종료 여부는 Socket.IO의 `disconnect`로 확인한다. reset 알림이 유실될 수도 있다.
 
-현재 ready의 `guest`는 **이 소켓에 회원 인증이 붙지 않았다는 의미**다. HTTP 로그인 상태를 guest로 덮어쓰거나 로그인 쿠키를 지우지 않는다. 로그인한 사람도 이번 버전에서는 관람자로 연결된다. `canDraw`는 항상 false다.
+ready의 viewer는 접속 시 세션 쿠키를 검증한 결과다. 유효한 세션은 `authenticated`, 쿠키가 없거나 유효하지 않으면 `guest`다. `canDraw`는 접속 시 인증 여부를 안내한다. 획의 첫 좌표와 마지막 좌표 전송에서 세션을 다시 검증하고, 중간 전송에서는 해당 획의 인증 상태를 사용한다. 현재 단계는 평생 획 제한을 집행하지 않는다. 소켓의 guest 상태만으로 HTTP 로그인 쿠키를 지우지 않는다.
 
 연결 수는 사용자 수가 아니다. 한 사람이 탭 두 개를 열면 2개로 센다. UI에는 ‘연결 수’로 표시한다.
 
@@ -114,7 +114,7 @@ export function openMainCanvasConnection(backendOrigin, onState, onPresence) {
     retryAttempt = 0;
     unexplainedDisconnects = 0;
     onPresence(payload.presence.connectionCount);
-    onState({ status: 'ready' });
+    onState({ status: 'ready', viewer: payload.viewer, canDraw: payload.canDraw });
   });
   socket.on('canvas:presence', (payload) => {
     if (
@@ -171,6 +171,7 @@ export function openMainCanvasConnection(backendOrigin, onState, onPresence) {
   socket.connect();
 
   return {
+    socket,
     dispose() {
       stopped = true;
       ready = false;
@@ -207,7 +208,7 @@ export function openMainCanvasConnection(backendOrigin, onState, onPresence) {
 - ready 없이 이유를 알 수 없는 서버 강제 종료가 3회 연속 발생하면 자동 재연결을 멈추고 실패 이유를 표시한다.
 - `connect` 이후 5초 안에 ready가 없으면 해당 연결을 정리하고 지연 재시도한다. ready 수신·종료·새 접속·화면 이탈 때 기존 타이머를 취소한다.
 - 계약 버전과 payload의 기본 타입을 확인한다. 지원하지 않는 계약은 자동 재시도로 해결하지 않는다.
-- 연결이 끊기면 기존 그림을 유지하며 ‘재연결 중’을 표시한다. 현재 버전에는 그림 수신·누락분 복구가 없다.
+- 연결이 끊기면 확정된 그림을 유지하며 ‘재연결 중’을 표시한다. 새 ready를 받으면 [그림 동기화 가이드](drawing-sync.md)에 따라 누락된 획을 복구한다.
 - 이 예제는 `reconnection: false`이므로 `socket.active`가 true여도 Socket.IO가 자동 재연결하지 않는다. 화면 상태는 `onState`를 기준으로 하고, 별도 자동 재시도 루프를 추가하지 않는다.
 
 ## 4. React와 연결 소유권
@@ -220,13 +221,13 @@ export function openMainCanvasConnection(backendOrigin, onState, onPresence) {
 - 비동기 UI 처리는 시작한 연결이 현재 연결인지 확인한 뒤 적용한다. 자동 재접속도 새 연결로 취급한다.
 - 연결 수는 서버가 보내준 값으로 교체한다. 프론트에서 1씩 더하거나 빼지 않는다.
 
-## 5. 다음 단계와의 경계
+## 5. 로그인과 그림 동기화
 
-이번 서버에는 클라이언트가 보낼 앱 이벤트가 없다. room 참가, 로그인 전환, 좌표·획·이미지 전송을 보내지 않는다. 연습하기는 프론트에서 처리한다.
+그림은 `stroke:append`, `stroke:preview`, `canvas:sync`로 전송·방송·복구한다. 완료는 마지막 append의 `isFinal`로 표시한다. [그림 동기화 가이드](drawing-sync.md)를 따른다. room 참가는 서버가 처리하며 별도의 시작·취소 이벤트는 없다. 연습하기는 프론트에서 처리한다.
 
-로그인·로그아웃을 해도 현재 소켓은 계속 관람자다. 지갑 주소나 `isLoggedIn` 값을 보내 회원으로 전환할 수 없다.
+로그인·로그아웃 후 소켓을 다시 연결해 새 handshake 쿠키를 사용한다. 지갑 주소나 `isLoggedIn` 값으로 인증하지 않는다. 기존 연결의 폐기된 세션은 그리기 요청에서 거절된다. 소켓 트래픽은 HTTP 세션의 활동 만료를 연장하지 않는다.
 
-향후 그리기 기능을 붙일 때는 그림 동기화와 그리기 권한 검증이 끝난 뒤 참여를 허용한다. 끊긴 동안 입력을 기본 소켓 버퍼에 쌓았다가 자동으로 새 획처럼 보내지 않도록 별도 정책이 필요하다.
+끊긴 동안 preview를 Socket.IO 기본 버퍼에 쌓지 않는다. ACK를 확인하지 못한 좌표 묶음은 같은 획 ID·chunkIndex·데이터로 재전송한다. 메모리 세대가 바뀌면 이전 그림과 재전송 대기를 비운다.
 
 ## 6. 프론트 연결 확인 순서
 

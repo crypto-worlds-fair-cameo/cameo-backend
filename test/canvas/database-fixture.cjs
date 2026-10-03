@@ -1,0 +1,97 @@
+const { execFileSync } = require('node:child_process');
+const { mkdtempSync, readFileSync, readdirSync, rmSync } = require('node:fs');
+const { join, resolve } = require('node:path');
+const { after } = require('node:test');
+const { Global, Module } = require('@nestjs/common');
+const { Pool } = require('pg');
+const { PG_POOL } = require('../../dist/database/pg.constants');
+const {
+  TransactionRunner,
+} = require('../../dist/database/transaction/transaction-runner');
+const {
+  PgTransactionRunner,
+} = require('../../dist/database/transaction/pg-transaction.runner');
+
+let directory;
+let binaries;
+let pool;
+let started = false;
+
+/** 운영 DB와 분리한 임시 PostgreSQL에서 실제 세션 인증을 검증한다. */
+async function testDatabaseModule() {
+  if (!pool) {
+    binaries =
+      process.env.PG_TEST_BINDIR ||
+      execFileSync('pg_config', ['--bindir'], { encoding: 'utf8' }).trim();
+    directory = mkdtempSync('/tmp/cameo-realtime-');
+    execFileSync(
+      join(binaries, 'initdb'),
+      [
+        '-D',
+        join(directory, 'data'),
+        '-A',
+        'trust',
+        '-U',
+        'postgres',
+        '--no-locale',
+      ],
+      { stdio: 'pipe' },
+    );
+    execFileSync(
+      join(binaries, 'pg_ctl'),
+      [
+        '-D',
+        join(directory, 'data'),
+        '-l',
+        join(directory, 'postgres.log'),
+        '-o',
+        `-k ${directory} -c listen_addresses=''`,
+        '-w',
+        'start',
+      ],
+      { stdio: 'pipe' },
+    );
+    started = true;
+    pool = new Pool({
+      host: directory,
+      user: 'postgres',
+      database: 'postgres',
+      max: 10,
+    });
+    const migrations = resolve(__dirname, '../../db/migrations');
+    for (const name of readdirSync(migrations)
+      .filter((name) => name.endsWith('.sql'))
+      .sort()) {
+      await pool.query(readFileSync(join(migrations, name), 'utf8'));
+    }
+  }
+  class TestDatabaseModule {}
+  Global()(TestDatabaseModule);
+  Module({
+    providers: [
+      { provide: PG_POOL, useValue: pool },
+      PgTransactionRunner,
+      { provide: TransactionRunner, useExisting: PgTransactionRunner },
+    ],
+    exports: [PG_POOL, TransactionRunner],
+  })(TestDatabaseModule);
+  return { module: TestDatabaseModule, pool };
+}
+
+after(async () => {
+  await pool?.end();
+  if (directory) {
+    try {
+      if (started)
+        execFileSync(
+          join(binaries, 'pg_ctl'),
+          ['-D', join(directory, 'data'), '-m', 'fast', '-w', 'stop'],
+          { stdio: 'pipe' },
+        );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+module.exports = { testDatabaseModule };

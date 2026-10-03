@@ -1,111 +1,13 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-require('reflect-metadata');
-const { Controller, Get, Global, Module } = require('@nestjs/common');
-const { ConfigService } = require('@nestjs/config');
-const { NestFactory } = require('@nestjs/core');
-const { io, Manager } = require('socket.io-client');
-const { configureApp } = require('../../dist/app.factory');
-const { LoggerService } = require('../../dist/logging/logger.service');
-const { CanvasModule } = require('../../dist/modules/canvas/canvas.module');
-
+const { Manager } = require('socket.io-client');
+const {
+  startServer,
+  createClient,
+  nextEvent,
+  connect,
+} = require('./server-fixture.cjs');
 const origin = 'http://localhost:5173';
-
-/** 실제 HTTP·WebSocket 서버를 띄우되 관람 연결에 필요 없는 DB는 구성하지 않는다. */
-async function startServer(t, maxConnections = 20) {
-  class TestConfigModule {}
-  Global()(TestConfigModule);
-  Module({
-    providers: [
-      {
-        provide: ConfigService,
-        useValue: new ConfigService({
-          app: {
-            apiPrefix: 'api',
-            nodeEnv: 'test',
-            trustProxyHops: 0,
-            version: 'test',
-          },
-          cors: {
-            originList: [origin],
-            credentials: true,
-            methods: ['GET'],
-            allowedHeaders: ['Content-Type'],
-          },
-          realtime: { maxConnections },
-        }),
-      },
-    ],
-    exports: [ConfigService],
-  })(TestConfigModule);
-
-  class ProbeController {
-    get() {
-      return { alive: true };
-    }
-  }
-  Controller('probe')(ProbeController);
-  Get()(
-    ProbeController.prototype,
-    'get',
-    Object.getOwnPropertyDescriptor(ProbeController.prototype, 'get'),
-  );
-
-  class TestAppModule {}
-  Module({
-    imports: [TestConfigModule, CanvasModule],
-    providers: [LoggerService],
-    controllers: [ProbeController],
-  })(TestAppModule);
-  const app = configureApp(
-    await NestFactory.create(TestAppModule, { logger: false }),
-  );
-  app.useLogger(false);
-  t.after(() => app.close());
-  await app.listen(0, '127.0.0.1');
-  return { app, url: await app.getUrl() };
-}
-
-/** 리스너를 먼저 등록할 수 있도록 자동 접속을 끈 독립 클라이언트를 만든다. */
-function createClient(t, url, options = {}, namespace = '/canvas') {
-  const socket = io(`${url}${namespace}`, {
-    path: '/realtime',
-    transports: ['websocket'],
-    extraHeaders: { Origin: origin },
-    forceNew: true,
-    autoConnect: false,
-    reconnection: false,
-    timeout: 1500,
-    ...options,
-  });
-  t.after(() => {
-    socket.removeAllListeners();
-    socket.disconnect();
-  });
-  return socket;
-}
-
-function nextEvent(socket, event, predicate = () => true) {
-  return new Promise((resolve, reject) => {
-    const listener = (...args) => {
-      if (!predicate(...args)) return;
-      clearTimeout(timer);
-      socket.off(event, listener);
-      resolve(args[0]);
-    };
-    const timer = setTimeout(() => {
-      socket.off(event, listener);
-      reject(new Error(`Timed out waiting for ${event}`));
-    }, 3000);
-    socket.on(event, listener);
-  });
-}
-
-async function connect(socket) {
-  const ready = nextEvent(socket, 'connection:ready');
-  socket.connect();
-  return ready;
-}
 
 test('two guests receive ready, current presence, and fresh state after reconnect', async (t) => {
   const { url } = await startServer(t);
@@ -156,7 +58,7 @@ test('two guests receive ready, current presence, and fresh state after reconnec
   });
 });
 
-test('cookies and claimed identity do not authenticate this connection-only phase', async (t) => {
+test('invalid cookies and claimed identity cannot authenticate a connection', async (t) => {
   const { url } = await startServer(t);
   const socket = createClient(t, url, {
     extraHeaders: { Origin: origin, Cookie: 'cameo_session=unverified' },
@@ -241,7 +143,7 @@ test('unknown events cannot broadcast and excessive messages reset only the send
   await connect(observer);
   await connect(sender);
   let relayed = false;
-  observer.on('stroke:append', () => {
+  observer.on('stroke:preview', () => {
     relayed = true;
   });
   const reset = nextEvent(sender, 'connection:reset');
@@ -251,8 +153,7 @@ test('unknown events cannot broadcast and excessive messages reset only the send
     'canvas:presence',
     (p) => p.connectionCount === 1,
   );
-  for (let i = 0; i < 11; i++)
-    sender.emit('stroke:append', { points: [[i, i]] });
+  for (let i = 0; i < 11; i++) sender.emit('unsupported', { points: [[i, i]] });
   assert.deepEqual(await reset, {
     reason: 'connection_policy',
     retryable: false,
