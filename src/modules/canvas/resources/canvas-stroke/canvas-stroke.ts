@@ -49,8 +49,15 @@ export const STROKE_LIMITS = {
   appendPoints: 128,
   appendBytes: 8 * 1024,
   syncPageBytes: 128 * 1024,
-  retainedBytes: 64 * 1024 * 1024,
-  retainedChunks: 20_000,
+  pendingBytes: 16 * 1024 * 1024,
+  pendingChunks: 4096,
+  recentBytes: 16 * 1024 * 1024,
+  recentChunks: 4096,
+  stateBytes: 8 * 1024 * 1024,
+  stateCount: 2048,
+  flushBytes: 1024 * 1024,
+  flushChunks: 256,
+  flushIntervalMs: 1000,
 } as const;
 
 /** 업무 거절만 공개 코드로 전달하며 내부 DB 오류는 소켓 경계에서 숨긴다. */

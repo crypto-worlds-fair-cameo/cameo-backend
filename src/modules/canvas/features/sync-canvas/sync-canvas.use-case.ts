@@ -9,8 +9,8 @@ import type {
 export class SyncCanvasUseCase {
   constructor(private readonly drawing: CanvasDrawing) {}
 
-  /** 관람자도 메모리에 수신한 좌표 묶음을 순서대로 복구한다. DB는 조회하지 않는다. */
+  /** 관람자도 저장된 좌표와 아직 저장되지 않은 좌표를 같은 순서로 복구한다. */
   execute(input: SyncCanvasInput & { limit: number }): Promise<CanvasSyncPage> {
-    return Promise.resolve(this.drawing.page(input));
+    return this.drawing.page(input);
   }
 }

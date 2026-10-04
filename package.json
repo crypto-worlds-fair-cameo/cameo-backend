@@ -14,7 +14,7 @@
     "start:prod": "node --enable-source-maps dist/main.js",
     "lint": "oxlint --deny-warnings src",
     "typecheck": "tsc --noEmit --incremental false",
-    "test:realtime": "npm run build && node --test test/canvas/*.test.cjs",
+    "test:realtime": "npm run build && node --test --test-concurrency=1 test/canvas/*.test.cjs",
     "lint:fix": "oxlint --fix src",
     "format:check": "prettier --check \"src/**/*.ts\""
   },

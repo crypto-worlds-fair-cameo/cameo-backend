@@ -223,12 +223,13 @@ test('sync reads ordered chunks with a fixed boundary after reconnect and resets
   );
 });
 
-test('a fresh server has no previous drawing history or epoch', async (t) => {
+test('a restarted server replays saved drawing with a new epoch', async (t) => {
   const first = await startServer(t);
   const { socket } = await member(t, first);
   const preview = (
     await request(socket, 'stroke:append', input({ isFinal: true }))
   ).data.preview;
+  await first.app.close();
   const second = await startServer(t);
   const guest = createClient(t, second.url);
   await connect(guest);
@@ -240,8 +241,11 @@ test('a fresh server has no previous drawing history or epoch', async (t) => {
   ).data;
   assert.notEqual(page.epoch, preview.epoch);
   assert.equal(page.reset, true);
-  assert.deepEqual(page.previews, []);
-  assert.equal(page.headSequence, '0');
+  assert.equal(page.previews.length, 1);
+  assert.equal(page.previews[0].clientStrokeId, preview.clientStrokeId);
+  assert.equal(page.previews[0].sequence, '1');
+  assert.equal(page.previews[0].epoch, page.epoch);
+  assert.equal(page.headSequence, '1');
 });
 
 test('empty final chunk closes a stroke and removed commit no longer handles requests', async (t) => {
@@ -258,40 +262,13 @@ test('empty final chunk closes a stroke and removed commit no longer handles req
   assert.equal(final.ok, true);
   assert.equal(final.data.preview.isFinal, true);
   await assert.rejects(
-    socket
-      .timeout(100)
-      .emitWithAck('stroke:commit', {
-        clientStrokeId: stroke.clientStrokeId,
-        brush,
-        points,
-      }),
+    socket.timeout(100).emitWithAck('stroke:commit', {
+      clientStrokeId: stroke.clientStrokeId,
+      brush,
+      points,
+    }),
     /timed out/,
   );
   const page = await request(socket, 'canvas:sync', { afterSequence: '0' });
   assert.equal(page.data.previews.length, 2);
-});
-
-test('memory capacity rejects new chunks while retaining the existing drawing for sync', (t) => {
-  const {
-    CanvasDrawing,
-  } = require('../../dist/modules/canvas/resources/canvas-drawing/canvas-drawing');
-  const {
-    STROKE_LIMITS,
-  } = require('../../dist/modules/canvas/resources/canvas-stroke/canvas-stroke');
-  const drawing = new CanvasDrawing();
-  t.after(() => drawing.onModuleDestroy());
-  const first = input({ points: [{ x: 1, y: 1 }], isFinal: true });
-  for (let i = 0; i < STROKE_LIMITS.retainedChunks; i++)
-    drawing.append('connection', 'user', {
-      ...first,
-      clientStrokeId: i === 0 ? first.clientStrokeId : randomUUID(),
-    });
-  assert.throws(
-    () => drawing.append('connection', 'user', input({ isFinal: true })),
-    (error) => error.code === 'CANVAS_CAPACITY_REACHED',
-  );
-  const page = drawing.page({ afterSequence: '0', limit: 1 });
-  assert.equal(page.previews[0].clientStrokeId, first.clientStrokeId);
-  assert.equal(page.previews[0].sequence, '1');
-  assert.equal(page.hasMore, true);
 });

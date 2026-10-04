@@ -18,7 +18,7 @@ let pool;
 let started = false;
 
 /** 운영 DB와 분리한 임시 PostgreSQL에서 실제 세션 인증을 검증한다. */
-async function testDatabaseModule() {
+async function testDatabaseModule(managed = false) {
   if (!pool) {
     binaries =
       process.env.PG_TEST_BINDIR ||
@@ -65,17 +65,21 @@ async function testDatabaseModule() {
       await pool.query(readFileSync(join(migrations, name), 'utf8'));
     }
   }
+  // 실제 DatabaseModule의 종료 순서도 검증할 수 있게 별도 pool만 앱이 소유하게 한다.
+  const applicationPool = managed ? new Pool({ ...pool.options }) : pool;
+  const { DatabaseModule } = require('../../dist/database/database.module');
   class TestDatabaseModule {}
   Global()(TestDatabaseModule);
   Module({
     providers: [
-      { provide: PG_POOL, useValue: pool },
+      { provide: PG_POOL, useValue: applicationPool },
+      ...(managed ? [DatabaseModule] : []),
       PgTransactionRunner,
       { provide: TransactionRunner, useExisting: PgTransactionRunner },
     ],
     exports: [PG_POOL, TransactionRunner],
   })(TestDatabaseModule);
-  return { module: TestDatabaseModule, pool };
+  return { module: TestDatabaseModule, pool: applicationPool };
 }
 
 after(async () => {

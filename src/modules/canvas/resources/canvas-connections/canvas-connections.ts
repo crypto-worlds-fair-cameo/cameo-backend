@@ -89,6 +89,7 @@ export class CanvasConnections implements BeforeApplicationShutdown {
     // 인증 대기 중 끊긴 연결은 집계하지 않고 준비된 연결만 room에 넣는다.
     void socket.join(MAIN_CANVAS_ROOM);
     this.connections.set(socket.id, socket);
+    this.drawing.connected(socket.id);
     this.requests.set(socket.id, new Map());
     const onClientEvent = this.createMessageLimit(socket);
     socket.onAny(onClientEvent);

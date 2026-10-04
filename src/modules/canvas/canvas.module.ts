@@ -8,6 +8,8 @@ import { AppendStrokeGateway } from './features/append-stroke/append-stroke.gate
 import { AppendStrokeUseCase } from './features/append-stroke/append-stroke.use-case';
 import { SyncCanvasGateway } from './features/sync-canvas/sync-canvas.gateway';
 import { SyncCanvasUseCase } from './features/sync-canvas/sync-canvas.use-case';
+import { CanvasStrokeUsageRepository } from './resources/canvas-stroke-usage/canvas-stroke-usage.repository';
+import { CanvasChunkRepository } from './resources/canvas-drawing/canvas-chunk.repository';
 
 @Module({
   imports: [AuthModule],
@@ -16,6 +18,8 @@ import { SyncCanvasUseCase } from './features/sync-canvas/sync-canvas.use-case';
     CanvasConnections,
     CanvasAccess,
     CanvasDrawing,
+    CanvasChunkRepository,
+    CanvasStrokeUsageRepository,
     AppendStrokeGateway,
     AppendStrokeUseCase,
     SyncCanvasGateway,

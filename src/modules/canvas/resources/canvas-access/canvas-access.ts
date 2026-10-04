@@ -49,15 +49,20 @@ export class CanvasAccess {
   }
 
   /** 시작과 완료 전송에서만 기존 세션을 다시 확인하고 인증된 사용자 ID를 반환한다. */
-  async authenticate(token: string | undefined): Promise<string> {
+  async authenticate(
+    token: string | undefined,
+    transaction?: TransactionContext,
+  ): Promise<string> {
     // 쿠키가 없거나 형식이 틀리면 DB 트랜잭션을 열지 않고 거절한다.
     if (!isAuthSecret(token))
       throw new CanvasStrokeError(
         'AUTH_REQUIRED',
         'Authentication is required.',
       );
-    return this.transactions.run(async (transaction: TransactionContext) => {
-      const result = await this.authenticator.authenticate(token, transaction);
+    const authenticate = async (
+      context: TransactionContext,
+    ): Promise<string> => {
+      const result = await this.authenticator.authenticate(token, context);
       if (result.outcome !== 'authenticated')
         throw new CanvasStrokeError(
           result.outcome === 'unavailable'
@@ -68,6 +73,10 @@ export class CanvasAccess {
             : 'Authentication is required.',
         );
       return result.user.id;
-    });
+    };
+    // 첫 좌표의 인증과 획 차감은 같은 사용자 잠금을 유지하며 함께 커밋한다.
+    return transaction
+      ? authenticate(transaction)
+      : this.transactions.run(authenticate);
   }
 }

@@ -9,10 +9,23 @@ const { CanvasModule } = require('../../dist/modules/canvas/canvas.module');
 const { testDatabaseModule } = require('./database-fixture.cjs');
 
 const origin = 'http://localhost:5173';
+const initializedTests = new WeakSet();
 
 /** 실제 HTTP·WebSocket 서버를 띄우되 운영 DB와 분리한 임시 PostgreSQL을 사용한다. */
-async function startServer(t, maxConnections = 20) {
-  const database = await testDatabaseModule();
+async function startServer(t, maxConnections = 20, managedDatabase = false) {
+  const database = await testDatabaseModule(managedDatabase);
+  // 각 테스트만 초기화하고 같은 테스트의 재시작은 저장된 캔버스를 그대로 사용한다.
+  if (!initializedTests.has(t)) {
+    initializedTests.add(t);
+    const table = await database.pool.query(
+      "SELECT to_regclass('canvas_stroke_chunks') AS name",
+    );
+    if (table.rows[0].name) {
+      await database.pool.query(
+        'TRUNCATE canvas_stroke_chunks; UPDATE canvases SET last_chunk_sequence=0, last_sequence=0',
+      );
+    }
+  }
   class TestConfigModule {}
   Global()(TestConfigModule);
   Module({
