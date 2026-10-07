@@ -10,6 +10,9 @@ import { SyncCanvasGateway } from './features/sync-canvas/sync-canvas.gateway';
 import { SyncCanvasUseCase } from './features/sync-canvas/sync-canvas.use-case';
 import { CanvasStrokeUsageRepository } from './resources/canvas-stroke-usage/canvas-stroke-usage.repository';
 import { CanvasChunkRepository } from './resources/canvas-drawing/canvas-chunk.repository';
+import { CanvasDefinition } from './resources/canvas-definition/canvas-definition';
+import { CanvasRuntimeRegistry } from './resources/canvas-drawing/canvas-runtime-registry';
+import { SeasonCanvasQuery } from './resources/canvas-access/season-canvas-query';
 
 @Module({
   imports: [AuthModule],
@@ -17,7 +20,10 @@ import { CanvasChunkRepository } from './resources/canvas-drawing/canvas-chunk.r
     ConnectCanvasGateway,
     CanvasConnections,
     CanvasAccess,
+    SeasonCanvasQuery,
+    CanvasRuntimeRegistry,
     CanvasDrawing,
+    CanvasDefinition,
     CanvasChunkRepository,
     CanvasStrokeUsageRepository,
     AppendStrokeGateway,
@@ -25,5 +31,6 @@ import { CanvasChunkRepository } from './resources/canvas-drawing/canvas-chunk.r
     SyncCanvasGateway,
     SyncCanvasUseCase,
   ],
+  exports: [CanvasDefinition, CanvasDrawing],
 })
 export class CanvasModule {}

@@ -1,8 +1,8 @@
-# 메인 캔버스 실시간 연결 프론트 가이드
+# 캔버스 실시간 연결 프론트 가이드
 
 작성일: 2026-10-02
 
-상태: **관람 연결, 쿠키 기반 소켓 인증, 좌표 전송·방송·복구, 메인 획 사용 기록·제한 구현.**
+상태: **메인 캔버스 그림과 시즌별 관람·복구·조건부 그림 입력 구현.** 시즌 입력은 운영 기본값 `SEASON_DRAWING_ENABLED=false`로 닫혀 있다.
 
 연결 이벤트의 계약은 [서버 이벤트 타입](../../../src/modules/canvas/resources/canvas-connections/canvas-events.ts)을 기준으로 한다. HTTP 로그인은 [기존 로그인 가이드](../auth/login.md)를 따른다.
 
@@ -114,7 +114,11 @@ export function openMainCanvasConnection(backendOrigin, onState, onPresence) {
     retryAttempt = 0;
     unexplainedDisconnects = 0;
     onPresence(payload.presence.connectionCount);
-    onState({ status: 'ready', viewer: payload.viewer, canDraw: payload.canDraw });
+    onState({
+      status: 'ready',
+      viewer: payload.viewer,
+      canDraw: payload.canDraw,
+    });
   });
   socket.on('canvas:presence', (payload) => {
     if (
@@ -184,6 +188,21 @@ export function openMainCanvasConnection(backendOrigin, onState, onPresence) {
 ```
 
 로컬 `backendOrigin`은 `http://localhost:5000`이다. HTTP API base가 `/api`로 끝나더라도 소켓 주소에 `/api`를 붙이지 않는다. 브라우저 기본 `new WebSocket()` 대신 Socket.IO 클라이언트를 사용한다.
+
+시즌 연결은 같은 설정에 `auth.canvasKey`만 추가한다. 서버가 해당 시즌 room과 크기를 결정하며, payload로 다른 캔버스를 선택할 수 없다. `connection:ready`의 시즌 상태와 크기를 표시하고, ready 뒤 `canvas:sync`로 해당 캔버스를 복구한다. 시즌 ready에는 `epoch`와 `headSequence`가 없다. 두 값은 sync 응답과 `season:state`에서만 얻는다.
+
+```js
+const socket = io(`${backendOrigin}/canvas`, {
+  path: '/realtime',
+  transports: ['websocket'],
+  withCredentials: true,
+  auth: { canvasKey: `season:${seasonId}` },
+});
+```
+
+예약 시즌은 익명도 연결하고 sync할 수 있지만 `canDraw`는 false다. 종료된 시즌도 읽기 전용으로 연결·복구할 수 있다. 진행 중인 참가자는 쓰기 flag가 켜진 환경에서만 `canDraw: true`를 받는다. `canDraw`는 연결 시점의 안내이므로 append ACK를 대신하지 않는다. 참가 직후, 로그인·로그아웃·계정 변경 후에는 기존 소켓을 정리하고 새 handshake로 연결한다.
+
+시즌의 전체 HTTP·소켓 상태 흐름과 이벤트 형태는 [2단계 프론트 연동 지침](../../frontend/season-canvas-phase-two.md)을 따른다.
 
 백엔드의 `CORS_ORIGIN_LIST`에 실제 프론트 Origin을 넣는다. 기본 허용값은 `http://localhost:5173`이며, `http://127.0.0.1:5173`은 다른 Origin이다. 브라우저가 Origin을 직접 보낸다. Node 테스트 도구에서는 Origin 헤더를 명시해야 한다.
 

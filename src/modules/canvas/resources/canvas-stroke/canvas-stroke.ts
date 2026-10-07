@@ -1,3 +1,5 @@
+import type { CanvasKey } from '../canvas-definition/canvas-target';
+
 /** 클라이언트 좌표와 브러시를 검증하고 소켓에 공개할 획 계약을 소유한다. */
 export type StrokePoint = { x: number; y: number; t?: number };
 export type StrokeBrush = {
@@ -19,7 +21,7 @@ export type AppendStrokeInput = StrokeInput & {
   isFinal: boolean;
 };
 export type StrokePreview = AppendStrokeInput & {
-  canvasKey: 'main';
+  canvasKey: CanvasKey;
   userId: string;
   epoch: string;
   sequence: string;
@@ -32,7 +34,7 @@ export type SyncCanvasInput = {
   limit?: number;
 };
 export type CanvasSyncPage = {
-  canvasKey: 'main';
+  canvasKey: CanvasKey;
   epoch: string;
   reset: boolean;
   previews: StrokePreview[];
@@ -83,8 +85,14 @@ function finite(value: unknown, min: number, max: number): value is number {
   );
 }
 
-/** 외부 값을 정규화해 동일한 그림의 재전송을 같은 데이터로 비교할 수 있게 한다. */
-export function parseAppend(value: unknown): AppendStrokeInput {
+/** 외부 값을 정규화하고 좌표를 선택한 캔버스 크기의 반열린 범위로 제한한다. */
+export function parseAppend(
+  value: unknown,
+  dimensions: Readonly<{ width: number; height: number }> = {
+    width: 10000,
+    height: 10000,
+  },
+): AppendStrokeInput {
   const invalid = () => {
     throw new CanvasStrokeError('INVALID_STROKE', 'Stroke data is invalid.');
   };
@@ -138,13 +146,13 @@ export function parseAppend(value: unknown): AppendStrokeInput {
     return invalid();
   let previousTime = -1;
   const points = value.points.map((point): StrokePoint => {
-    // 좌표는 화면이 아니라 메인 원본 캔버스 영역 안에 있어야 한다.
+    // 좌표는 화면이 아니라 선택한 원본 캔버스의 [0, width)·[0, height) 영역에 있어야 한다.
     if (
       !record(point) ||
-      !finite(point.x, 0, 10000) ||
-      point.x >= 10000 ||
-      !finite(point.y, 0, 10000) ||
-      point.y >= 10000
+      !finite(point.x, 0, dimensions.width) ||
+      point.x >= dimensions.width ||
+      !finite(point.y, 0, dimensions.height) ||
+      point.y >= dimensions.height
     )
       return invalid();
     const parsed: StrokePoint = { x: point.x, y: point.y };

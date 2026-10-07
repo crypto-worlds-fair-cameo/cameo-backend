@@ -28,8 +28,13 @@ export class SyncCanvasGateway {
     @MessageBody() body: unknown,
     @Ack() ack: CanvasAckCallback<CanvasSyncPage>,
   ): Promise<void> {
-    await this.connections.respond(socket, 'canvas:sync', ack, () =>
-      this.sync.execute(parseSync(body)),
-    );
+    await this.connections.respond(socket, 'canvas:sync', ack, () => {
+      const binding = this.connections.binding(socket);
+      return this.sync.execute(
+        parseSync(body),
+        binding.target,
+        binding.lease.runtime,
+      );
+    });
   }
 }

@@ -9,6 +9,10 @@ import type {
   StrokePoint,
   StrokePreview,
 } from '../canvas-stroke/canvas-stroke';
+import type {
+  CanvasKey,
+  CanvasTarget,
+} from '../canvas-definition/canvas-target';
 
 export type StoredChunk = { usageId: string; preview: StrokePreview };
 
@@ -23,12 +27,16 @@ type ChunkRow = {
   is_final: boolean;
 };
 
-/** DB 청크 행을 현재 서버 세대의 소켓 응답으로 바꾼다. */
-function toStoredChunk(row: ChunkRow, epoch: string): StoredChunk {
+/** DB 청크 행에 조회 대상 키와 현재 서버 세대를 더해 소켓 응답으로 바꾼다. */
+function toStoredChunk(
+  row: ChunkRow,
+  epoch: string,
+  canvasKey: CanvasKey,
+): StoredChunk {
   return {
     usageId: row.usage_id,
     preview: {
-      canvasKey: 'main',
+      canvasKey,
       userId: row.user_id,
       epoch,
       sequence: row.sequence,
@@ -46,30 +54,65 @@ function toStoredChunk(row: ChunkRow, epoch: string): StoredChunk {
 export class CanvasChunkRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
-  /** 메인 캔버스 ID와 DB에 연속 저장된 마지막 청크 순서를 반환한다. */
+  /** 기존 메인 설정을 읽어 일반 대상 초기화 경로로 위임한다. */
   async initialize(): Promise<{ canvasId: string; headSequence: string }> {
     const result = await this.pool.query<{
       id: string;
-      last_chunk_sequence: string;
-      stored_head_sequence: string;
+      width: number;
+      height: number;
+      stroke_limit_per_user: number;
     }>(
-      `SELECT c.id, c.last_chunk_sequence,
-              COALESCE((
-                SELECT max(ch.sequence) FROM canvas_stroke_chunks ch
-                WHERE ch.canvas_id = c.id
-              ), 0)::text AS stored_head_sequence
-       FROM canvases c WHERE c.type = 'main'`,
+      `SELECT id, width, height, stroke_limit_per_user
+       FROM canvases WHERE type = 'main'`,
     );
     const canvas = result.rows[0];
     // 메인 설정이 없으면 임의 캔버스를 만들지 않고 서버 초기화를 중단한다.
     if (!canvas) throw new Error('Main canvas is missing.');
+    return this.initializeTarget({
+      id: canvas.id,
+      key: 'main',
+      kind: 'main',
+      width: canvas.width,
+      height: canvas.height,
+      strokeLimitPerUser: canvas.stroke_limit_per_user,
+      startsAt: null,
+      endsAt: null,
+    });
+  }
+
+  /** 대상 캔버스의 DB head와 실제 마지막 청크가 일치할 때 초기 상태를 반환한다. */
+  async initializeTarget(
+    target: CanvasTarget,
+  ): Promise<{ canvasId: string; headSequence: string }> {
+    this.assertTargetIdentity(target.id, target.key, target.kind);
+    const result = await this.pool.query<{
+      last_chunk_sequence: string;
+      stored_head_sequence: string;
+    }>(
+      `SELECT c.last_chunk_sequence,
+              COALESCE((
+                SELECT max(ch.sequence) FROM canvas_stroke_chunks ch
+                WHERE ch.canvas_id = c.id
+              ), 0)::text AS stored_head_sequence
+       FROM canvases c WHERE c.id = $1 AND c.type = $2`,
+      [target.id, target.kind],
+    );
+    const canvas = result.rows[0];
+    // 삭제됐거나 type이 달라진 대상은 별도 런타임으로 초기화하지 않는다.
+    if (!canvas)
+      throw new Error(
+        target.kind === 'main'
+          ? 'Main canvas is missing.'
+          : 'Canvas is missing.',
+      );
     // head와 마지막 저장 행이 다르면 누락 범위를 숨기지 않고 초기화를 중단한다.
     if (canvas.last_chunk_sequence !== canvas.stored_head_sequence)
-      throw new Error('Main canvas chunk head is inconsistent.');
-    return {
-      canvasId: canvas.id,
-      headSequence: canvas.last_chunk_sequence,
-    };
+      throw new Error(
+        target.kind === 'main'
+          ? 'Main canvas chunk head is inconsistent.'
+          : 'Canvas chunk head is inconsistent.',
+      );
+    return { canvasId: target.id, headSequence: canvas.last_chunk_sequence };
   }
 
   /** 같은 사용자의 획에서 마지막으로 저장된 청크를 현재 epoch으로 반환한다. */
@@ -78,6 +121,7 @@ export class CanvasChunkRepository {
     userId: string,
     clientStrokeId: string,
     epoch: string,
+    canvasKey: CanvasKey = 'main',
   ): Promise<StoredChunk | undefined> {
     const result = await this.pool.query<ChunkRow>(
       `SELECT c.stroke_usage_id AS usage_id, u.user_id,
@@ -92,7 +136,7 @@ export class CanvasChunkRepository {
       [canvasId, userId, clientStrokeId],
     );
     const row = result.rows[0];
-    return row ? toStoredChunk(row, epoch) : undefined;
+    return row ? toStoredChunk(row, epoch, canvasKey) : undefined;
   }
 
   /** 같은 사용자의 획에서 지정한 chunkIndex로 저장된 청크를 현재 epoch으로 반환한다. */
@@ -102,6 +146,7 @@ export class CanvasChunkRepository {
     clientStrokeId: string,
     chunkIndex: number,
     epoch: string,
+    canvasKey: CanvasKey = 'main',
   ): Promise<StoredChunk | undefined> {
     const result = await this.pool.query<ChunkRow>(
       `SELECT c.stroke_usage_id AS usage_id, u.user_id,
@@ -116,7 +161,7 @@ export class CanvasChunkRepository {
       [canvasId, userId, clientStrokeId, chunkIndex],
     );
     const row = result.rows[0];
-    return row ? toStoredChunk(row, epoch) : undefined;
+    return row ? toStoredChunk(row, epoch, canvasKey) : undefined;
   }
 
   /** 지정한 전역 순서 범위의 청크를 오름차순으로 제한해 반환한다. */
@@ -126,6 +171,7 @@ export class CanvasChunkRepository {
     throughSequence: string,
     limit: number,
     epoch: string,
+    canvasKey: CanvasKey = 'main',
   ): Promise<StrokePreview[]> {
     const result = await this.pool.query<ChunkRow>(
       `SELECT c.stroke_usage_id AS usage_id, u.user_id,
@@ -139,7 +185,9 @@ export class CanvasChunkRepository {
        ORDER BY c.sequence ASC LIMIT $4`,
       [canvasId, afterSequence, throughSequence, limit],
     );
-    return result.rows.map((row) => toStoredChunk(row, epoch).preview);
+    return result.rows.map(
+      (row) => toStoredChunk(row, epoch, canvasKey).preview,
+    );
   }
 
   /**
@@ -151,12 +199,18 @@ export class CanvasChunkRepository {
     chunks: readonly StoredChunk[],
     afterSequence: string,
     transaction: TransactionContext,
+    canvasKey: CanvasKey = 'main',
   ): Promise<void> {
     // 빈 flush는 DB head를 잠그거나 바꾸지 않는다.
     if (chunks.length === 0) return;
 
     const after = BigInt(afterSequence);
-    this.assertContiguous(chunks, after);
+    this.assertTargetIdentity(
+      canvasId,
+      canvasKey,
+      canvasKey === 'main' ? 'main' : 'season',
+    );
+    this.assertContiguous(chunks, after, canvasKey);
     const first = chunks[0].preview.sequence;
     const last = chunks.at(-1)!.preview.sequence;
     const executor = getPgExecutor(this.pool, transaction);
@@ -220,16 +274,29 @@ export class CanvasChunkRepository {
   private assertContiguous(
     chunks: readonly StoredChunk[],
     afterSequence: bigint,
+    canvasKey: CanvasKey,
   ): void {
     for (let index = 0; index < chunks.length; index++) {
       const chunk = chunks[index];
       const expected = afterSequence + BigInt(index + 1);
       if (
-        chunk.preview.canvasKey !== 'main' ||
+        chunk.preview.canvasKey !== canvasKey ||
         BigInt(chunk.preview.sequence) !== expected
       )
         throw new Error('Canvas chunks must form a contiguous sequence.');
     }
+  }
+
+  /** 시즌 키의 UUID와 canvasId를 맞추고 키가 주장한 대상 종류를 확인한다. */
+  private assertTargetIdentity(
+    canvasId: string,
+    canvasKey: CanvasKey,
+    kind: CanvasTarget['kind'],
+  ): void {
+    const matches =
+      (kind === 'main' && canvasKey === 'main') ||
+      (kind === 'season' && canvasKey === `season:${canvasId.toLowerCase()}`);
+    if (!matches) throw new Error('Canvas target identity does not match.');
   }
 
   /** 모든 usageId가 입력 preview의 캔버스·사용자·획 ID와 일치하는지 저장 전에 확인한다. */

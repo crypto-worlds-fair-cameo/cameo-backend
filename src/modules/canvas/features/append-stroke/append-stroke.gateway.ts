@@ -31,13 +31,16 @@ export class AppendStrokeGateway {
     @Ack() ack: CanvasAckCallback<AppendStrokeResult>,
   ): Promise<void> {
     await this.connections.respond(socket, 'stroke:append', ack, async () => {
-      const input = parseAppend(body);
+      const binding = this.connections.binding(socket);
+      const input = parseAppend(body, binding.target);
       const result = await this.append.execute(
         socket.id,
         this.access.token(socket.handshake.headers.cookie),
         input,
+        binding.target,
       );
-      if (result.accepted) this.connections.preview(socket, result.preview);
+      // 요청 시작 때 검증한 binding으로 방송해 저장 대기 중 연결이 끊겨도 같은 방에 전달한다.
+      if (result.accepted) this.connections.preview(binding, result.preview);
       return result;
     });
   }

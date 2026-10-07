@@ -27,9 +27,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exception.getStatus()
           : ErrorCodes.InternalServerError.statusCode;
 
-    // 업무 오류는 정의된 값을 사용하고, 5xx와 알 수 없는 오류의 상세는 공개하지 않습니다.
+    // 재시도 계약이 있는 시즌 503만 중앙 정의와 정확히 일치할 때 공개합니다.
+    const publicSeasonUnavailable =
+      exception instanceof BusinessError &&
+      exception.statusCode ===
+        ErrorCodes.SeasonTemporarilyUnavailable.statusCode &&
+      exception.code === ErrorCodes.SeasonTemporarilyUnavailable.code &&
+      exception.message === ErrorCodes.SeasonTemporarilyUnavailable.message;
+
+    // 그 밖의 업무 오류는 4xx만 공개하고, 임의 5xx 상세는 기존처럼 숨깁니다.
     const publicError =
-      exception instanceof BusinessError && statusCode < 500
+      exception instanceof BusinessError &&
+      (statusCode < 500 || publicSeasonUnavailable)
         ? exception
         : ErrorCodes.InternalServerError;
     let { code, message } = publicError;
