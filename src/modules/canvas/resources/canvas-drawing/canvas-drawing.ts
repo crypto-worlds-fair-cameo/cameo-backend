@@ -89,6 +89,11 @@ export class CanvasDrawing implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** 종료 이미지는 resident 입력과 flush가 끝난 뒤 저장된 경계를 읽는다. */
+  prepareFinalSnapshot(canvasId: string): Promise<void> {
+    return this.registry.prepareFinalSnapshot(canvasId);
+  }
+
   /** 연결 gate 안에서 공개범위 확인·room 합류·binding 등록을 끝내고 생존 lease를 넘긴다. */
   leaseConnection(
     target: CanvasTarget,

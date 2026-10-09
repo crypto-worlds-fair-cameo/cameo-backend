@@ -284,7 +284,8 @@ export class CanvasConnections
     let messages = 0;
     return (event) => {
       // 지원 이벤트는 별도의 빈도·동시 요청 제한을 적용한다.
-      if (['stroke:append', 'canvas:sync'].includes(event)) return;
+      if (['stroke:append', 'canvas:sync', 'canvas:bootstrap'].includes(event))
+        return;
       const now = Date.now();
       if (now - windowStartedAt >= 10_000) {
         windowStartedAt = now;
@@ -304,7 +305,7 @@ export class CanvasConnections
   /** 전송별 빈도와 동시 요청을 제한하고 sync ACK 직전 binding 세대를 다시 확인한다. */
   async respond<T>(
     socket: CanvasSocket,
-    event: 'stroke:append' | 'canvas:sync',
+    event: 'stroke:append' | 'canvas:sync' | 'canvas:bootstrap',
     ack: CanvasAckCallback<T>,
     operation: () => Promise<T>,
   ): Promise<void> {
@@ -350,7 +351,10 @@ export class CanvasConnections
     try {
       const data = await operation();
       // 이 검사부터 ACK 호출까지 await하지 않아 취소 generation이 바뀐 결과를 내보내지 않는다.
-      if (event === 'canvas:sync' && !this.canAcknowledge(binding, generation))
+      if (
+        (event === 'canvas:sync' || event === 'canvas:bootstrap') &&
+        !this.canAcknowledge(binding, generation)
+      )
         throw this.unavailable();
       ack({ ok: true, data });
     } catch (error: unknown) {

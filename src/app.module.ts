@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import appConfig from './config/app.config';
+import canvasSnapshotConfig from './config/canvas-snapshot.config';
 import corsConfig from './config/cors.config';
 import databaseConfig from './config/database.config';
 import rateLimitConfig from './config/rate-limit.config';
@@ -24,6 +25,7 @@ import { SystemModule } from './system/system.module';
         rateLimitConfig,
         databaseConfig,
         realtimeConfig,
+        canvasSnapshotConfig,
       ],
     }),
     LoggerModule,

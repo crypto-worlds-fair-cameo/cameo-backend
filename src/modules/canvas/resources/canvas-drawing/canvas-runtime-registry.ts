@@ -339,6 +339,22 @@ export class CanvasRuntimeRegistry {
     }
   }
 
+  /** 최종 캡처 전에 기존 lifecycle gate에서 승인 처리를 배출하고 미저장 좌표를 flush한다. */
+  async prepareFinalSnapshot(canvasId: string): Promise<void> {
+    const inspect = async () => {
+      const state = await this.seasonCanvases?.observe(canvasId, undefined);
+      if (!state || state.cancelledAt || !this.isClosed(state))
+        throw new Error('Season is not eligible for a final snapshot.');
+      return state;
+    };
+    await this.withLifecycle(
+      canvasId,
+      'end',
+      async () => ({ result: undefined, state: await inspect() }),
+      inspect,
+    );
+  }
+
   /** lifecycle 작업은 기존 runtime gate를 재사용하고 무접속 시즌에는 control entry만 만든다. */
   async withLifecycle<T>(
     canvasId: string,

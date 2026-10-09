@@ -847,6 +847,11 @@ export class CanvasRuntime {
     return { epoch: this.epoch, headSequence: String(this.head) };
   }
 
+  /** bootstrap이 DB 저장 완료 경계 이하 스냅샷만 선택하도록 현재 저장 경계를 노출한다. */
+  get persistedHeadSequence(): string {
+    return String(this.persistedHead);
+  }
+
   get needsMaintenance(): boolean {
     return (
       this.queue.length > 0 ||

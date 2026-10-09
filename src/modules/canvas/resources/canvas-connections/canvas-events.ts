@@ -2,6 +2,7 @@ import type { Namespace, Socket } from 'socket.io';
 import type {
   AppendStrokeInput,
   AppendStrokeResult,
+  BootstrapCanvasInput,
   CanvasAckCallback,
   CanvasSyncPage,
   StrokePreview,
@@ -9,6 +10,7 @@ import type {
 } from '../canvas-stroke/canvas-stroke';
 import type { CanvasKey } from '../canvas-definition/canvas-target';
 import type { SeasonStatus } from '../../../seasons/resources/season/season-state';
+import type { CanvasBootstrapPayload } from '../canvas-snapshot/canvas-snapshot';
 
 export const MAIN_CANVAS_ROOM = 'canvas:main';
 
@@ -93,6 +95,10 @@ export interface CanvasClientEvents {
   'canvas:sync': (
     payload: SyncCanvasInput,
     ack: CanvasAckCallback<CanvasSyncPage>,
+  ) => void;
+  'canvas:bootstrap': (
+    payload: BootstrapCanvasInput,
+    ack: CanvasAckCallback<CanvasBootstrapPayload>,
   ) => void;
 }
 export type CanvasSocket = Socket<CanvasClientEvents, CanvasServerEvents>;

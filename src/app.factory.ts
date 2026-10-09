@@ -1,4 +1,5 @@
-import type { Express } from 'express';
+import express, { type Express } from 'express';
+import path from 'node:path';
 import helmet from 'helmet';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -49,6 +50,46 @@ export function configureApp(app: INestApplication): INestApplication {
   app.enableShutdownHooks();
   app.useLogger(logger);
   app.enableCors(createCorsOptions(configService));
+  const snapshotEnabled =
+    configService.get('canvasSnapshot.enabled', { infer: true }) === true;
+  if (snapshotEnabled) {
+    const storageRoot = configService.get('canvasSnapshot.storageRoot', {
+      infer: true,
+    });
+    const publicBaseUrl = configService.get('canvasSnapshot.publicBaseUrl', {
+      infer: true,
+    });
+    if (!storageRoot || !publicBaseUrl)
+      throw new Error('Canvas snapshot storage configuration is missing.');
+    const publicPath = new URL(publicBaseUrl).pathname.replace(/\/$/, '');
+    // 공개 경로는 snapshots 하위만 노출해 임시 파일과 내부 경로를 숨긴다.
+    expressApp.use(
+      `${publicPath}/snapshots`,
+      (req, res, next) => {
+        const uuid = '[0-9a-f-]{36}';
+        const allowed = new RegExp(
+          `^/(main|seasons)/${uuid}/${uuid}/(image\\.png|continuation\\.json)$`,
+        );
+        if (!allowed.test(req.path)) {
+          res.sendStatus(404);
+          return;
+        }
+        next();
+      },
+      express.static(path.join(storageRoot, 'snapshots'), {
+        fallthrough: false,
+        index: false,
+        dotfiles: 'deny',
+        immutable: true,
+        maxAge: '1y',
+        setHeaders: (res) => {
+          // 공개 작품은 다른 허용 origin에서도 이미지 바탕으로 읽을 수 있다.
+          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        },
+      }),
+    );
+  }
+
   // WebSocket Upgrade는 HTTP CORS와 별도로 출처와 연결 한도를 검사한다.
   app.useWebSocketAdapter(new SocketIoAdapter(app));
   app.use(createLoginMediaTypeMiddleware(apiPrefix));

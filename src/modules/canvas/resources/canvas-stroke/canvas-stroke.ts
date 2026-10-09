@@ -42,6 +42,10 @@ export type CanvasSyncPage = {
   nextSequence: string;
   hasMore: boolean;
 };
+export type BootstrapCanvasInput = {
+  preferSnapshot: boolean;
+  rendererVersion: string;
+};
 export type CanvasAck<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string } };
@@ -215,5 +219,24 @@ export function parseSync(
     afterSequence: value.afterSequence,
     throughSequence: value.throughSequence as string | undefined,
     limit: (value.limit as number | undefined) ?? 50,
+  };
+}
+
+/** bootstrap 요청은 스냅샷 선호 여부와 렌더러 버전만 허용한다. */
+export function parseBootstrap(value: unknown): BootstrapCanvasInput {
+  if (
+    !record(value) ||
+    typeof value.preferSnapshot !== 'boolean' ||
+    typeof value.rendererVersion !== 'string' ||
+    !/^[A-Za-z0-9._-]{1,64}$/.test(value.rendererVersion)
+  ) {
+    throw new CanvasStrokeError(
+      'INVALID_BOOTSTRAP',
+      'Canvas bootstrap input is invalid.',
+    );
+  }
+  return {
+    preferSnapshot: value.preferSnapshot,
+    rendererVersion: value.rendererVersion,
   };
 }
