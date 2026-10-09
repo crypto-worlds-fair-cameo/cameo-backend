@@ -20,9 +20,12 @@ import { CanvasSnapshotFiles } from './resources/canvas-snapshot/canvas-snapshot
 import { CanvasSnapshotRenderer } from './resources/canvas-snapshot/canvas-snapshot-renderer';
 import { CanvasSnapshotRunner } from './resources/canvas-snapshot/canvas-snapshot-runner';
 import { CanvasSnapshotRepository } from './resources/canvas-snapshot/canvas-snapshot.repository';
+import { ListCanvasHistoryController } from './features/list-canvas-history/list-canvas-history.controller';
+import { ListCanvasHistoryUseCase } from './features/list-canvas-history/list-canvas-history.use-case';
 
 @Module({
   imports: [AuthModule, LoggerModule],
+  controllers: [ListCanvasHistoryController],
   providers: [
     ConnectCanvasGateway,
     CanvasConnections,
@@ -43,6 +46,7 @@ import { CanvasSnapshotRepository } from './resources/canvas-snapshot/canvas-sna
     SyncCanvasUseCase,
     BootstrapCanvasGateway,
     BootstrapCanvasUseCase,
+    ListCanvasHistoryUseCase,
   ],
   exports: [CanvasDefinition, CanvasDrawing],
 })

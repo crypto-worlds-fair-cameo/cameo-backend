@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../../../../database/pg.constants';
 import { getPgExecutor } from '../../../../database/transaction/pg-executor';
+import type { TransactionContext } from '../../../../database/transaction/transaction-context';
 import { TransactionRunner } from '../../../../database/transaction/transaction-runner';
 import type { CanvasTarget } from '../canvas-definition/canvas-target';
 import {
@@ -40,6 +41,37 @@ type TargetRow = {
   starts_at: Date | null;
   ends_at: Date | null;
 };
+
+type HistoryRow = {
+  accessible_canvas_id: string;
+  id: string | null;
+  image_key: string | null;
+  width: number | null;
+  height: number | null;
+  is_final: boolean | null;
+  captured_at: Date | null;
+  captured_at_cursor: string | null;
+};
+
+export type CanvasSnapshotHistoryCursor = Readonly<{
+  capturedAt: string;
+  id: string;
+}>;
+
+export type CanvasSnapshotHistoryRecord = Readonly<{
+  id: string;
+  imageKey: string;
+  width: number;
+  height: number;
+  isFinal: boolean;
+  capturedAt: Date;
+  cursorCapturedAt: string;
+}>;
+
+export type CanvasSnapshotHistoryPage = Readonly<{
+  canvasExists: boolean;
+  records: CanvasSnapshotHistoryRecord[];
+}>;
 
 const SNAPSHOT_COLUMNS = `
   id, canvas_id, through_sequence, renderer_version, width, height,
@@ -97,6 +129,98 @@ export class CanvasSnapshotRepository {
     @Inject(PG_POOL) private readonly pool: Pool,
     private readonly transactions: TransactionRunner,
   ) {}
+
+  /** 조회자에게 공개된 캔버스의 READY 스냅샷을 캡처 시각과 ID 기준 최신순으로 반환한다. */
+  async historyPage(
+    input: Readonly<{
+      canvasId: string;
+      userId?: string;
+      cursor?: CanvasSnapshotHistoryCursor;
+      limit: number;
+    }>,
+    transaction: TransactionContext,
+  ): Promise<CanvasSnapshotHistoryPage> {
+    const result = await getPgExecutor(
+      this.pool,
+      transaction,
+    ).query<HistoryRow>(
+      `WITH accessible_canvas AS MATERIALIZED (
+         SELECT c.id
+         FROM canvases c
+         LEFT JOIN seasons s
+           ON s.canvas_id = c.id AND c.type = 'season'
+         WHERE c.id = $1::uuid
+           AND (
+             c.type = 'main'
+             OR (
+               c.type = 'season'
+               AND s.canvas_id IS NOT NULL
+               AND (s.cancelled_at IS NULL OR s.creator_id = $2::uuid)
+             )
+           )
+       ), page AS (
+         SELECT cs.id, cs.image_key, cs.width, cs.height, cs.is_final,
+                cs.captured_at,
+                to_char(
+                  cs.captured_at AT TIME ZONE 'UTC',
+                  'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                ) AS captured_at_cursor
+         FROM canvas_snapshots cs
+         JOIN accessible_canvas ac ON ac.id = cs.canvas_id
+         WHERE cs.status = 'READY'
+           AND (
+             $3::timestamptz IS NULL
+             OR (cs.captured_at, cs.id) < ($3::timestamptz, $4::uuid)
+           )
+         ORDER BY cs.captured_at DESC, cs.id DESC
+         LIMIT $5
+       )
+       SELECT ac.id AS accessible_canvas_id, p.id, p.image_key, p.width,
+              p.height, p.is_final, p.captured_at, p.captured_at_cursor
+       FROM accessible_canvas ac
+       LEFT JOIN page p ON true
+       ORDER BY p.captured_at DESC, p.id DESC`,
+      [
+        input.canvasId,
+        input.userId ?? null,
+        input.cursor?.capturedAt ?? null,
+        input.cursor?.id ?? null,
+        input.limit,
+      ],
+    );
+
+    // 접근 가능한 캔버스가 없으면 CTE 결과도 없으므로 빈 히스토리와 구분한다.
+    if (result.rows.length === 0) {
+      return { canvasExists: false, records: [] };
+    }
+
+    // LEFT JOIN의 null 행은 접근 가능한 캔버스에 조회할 스냅샷이 없음을 뜻한다.
+    const records = result.rows.flatMap((row) => {
+      if (
+        row.id === null ||
+        row.image_key === null ||
+        row.width === null ||
+        row.height === null ||
+        row.is_final === null ||
+        row.captured_at === null ||
+        row.captured_at_cursor === null
+      ) {
+        return [];
+      }
+      return [
+        {
+          id: row.id,
+          imageKey: row.image_key,
+          width: row.width,
+          height: row.height,
+          isFinal: row.is_final,
+          capturedAt: row.captured_at,
+          cursorCapturedAt: row.captured_at_cursor,
+        },
+      ];
+    });
+    return { canvasExists: true, records };
+  }
 
   /** 주기 캡처 대상 또는 종료 후 최종 결과가 없는 시즌을 UUID keyset으로 최대 100개 반환한다. */
   async targets(afterId?: string, final = false): Promise<CanvasTarget[]> {

@@ -7,6 +7,7 @@ HTTP API 경로, 요청·응답 필드, 인증 조건과 오류는 서버가 생
 - 사용 가이드: [지갑 로그인](auth/login.md).
 - 사용 가이드: [닉네임 설정](user/display-name.md).
 - 사용 가이드: [메인 캔버스 실시간 연결](canvas/realtime-connection.md)과 [그림 동기화](canvas/drawing-sync.md).
+- 사용 가이드: [캔버스 히스토리 조회](canvas/history.md).
 - 사용 가이드: [시즌 생성·조회·참가·취소·종료](seasons/lifecycle.md).
 - 프론트 인계: [시즌 참가·실시간 캔버스 2단계](../frontend/season-canvas-phase-two.md).
 
