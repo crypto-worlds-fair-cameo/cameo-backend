@@ -1,0 +1,64 @@
+name: CI
+
+# PR을 올리거나 main·dev에 푸시할 때마다 자동으로 검사한다. 실패하면 GitHub 화면에 빨간 표시가 뜬다.
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+# 같은 브랜치에 새로 푸시하면 이전 검사는 취소해 시간을 아낀다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 정적 검사와 빌드
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 버전은 .nvmrc(24.21.0)를 따라 서버와 맞춘다.
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm run build
+
+  test:
+    name: 실시간·NFT 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 테스트는 이 임시 PostgreSQL 안에 테스트용 DB를 만들었다 지운다. 운영 DB와는 무관하다.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PG_TEST_ADMIN_URL: postgres://ci:ci@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:realtime
+      - run: npm run test:nft

@@ -1,0 +1,41 @@
+name: Deploy backend
+
+# 자동으로 배포되지 않는다. GitHub의 Actions 탭 → "Deploy backend" → "Run workflow" 버튼을 눌렀을 때만
+# 운영 서버(api.cameoprint.com)에 접속해 서버에 설치된 배포 스크립트(/home/cameo/deploy.sh)를 실행한다.
+# DB 변경 파일(db/migrations)이 새로 생긴 경우 스크립트가 배포를 멈추므로, 그때는 서버에서 수동으로 적용한다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 배포 두 개가 동시에 돌지 않게 한다.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 운영 서버 배포
+    # 반드시 main 브랜치에서만 실행한다.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH 설정
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          # 윈도우에서 복사한 값의 줄바꿈(\r)은 제거한다.
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+
+      - name: 서버에서 배포 스크립트 실행
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        # 서버의 SSH 설정이 이 키로는 deploy.sh만 실행하도록 막아 두므로 뒤의 단어는 의미가 없다.
+        run: ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" deploy
