@@ -202,6 +202,7 @@ export class LoginController {
     });
     return {
       user: result.user,
+      activeWallet: result.activeWallet,
       session: result.session,
       isNewUser: result.isNewUser,
     };

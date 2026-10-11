@@ -1,17 +1,15 @@
 const assert = require('node:assert/strict');
-const { randomBytes, randomUUID, createHash } = require('node:crypto');
+const { randomBytes, randomUUID } = require('node:crypto');
 const { test } = require('node:test');
 const { startServer, createClient, connect } = require('./server-fixture.cjs');
+const { insertWalletSession } = require('./wallet-session-fixture.cjs');
 
 /** 사용자별 세션을 실제 DB에 생성해 서로 다른 탭의 동일 계정을 재현한다. */
 async function member(t, server) {
   const userId = randomUUID();
   const token = randomBytes(32).toString('base64url');
   await server.pool.query('INSERT INTO users (id) VALUES ($1)', [userId]);
-  await server.pool.query(
-    'INSERT INTO auth_sessions (user_id, token_hash) VALUES ($1, $2)',
-    [userId, createHash('sha256').update(token).digest('hex')],
-  );
+  await insertWalletSession(server.pool, userId, token);
   const socket = await tab(t, server, token);
   return { socket, userId, token };
 }

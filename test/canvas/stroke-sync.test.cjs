@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { randomBytes, randomUUID, createHash } = require('node:crypto');
+const { randomBytes, randomUUID } = require('node:crypto');
 const { test } = require('node:test');
 const {
   startServer,
@@ -7,6 +7,7 @@ const {
   nextEvent,
   connect,
 } = require('./server-fixture.cjs');
+const { insertWalletSession } = require('./wallet-session-fixture.cjs');
 
 const brush = {
   type: 'round',
@@ -24,10 +25,7 @@ async function member(t, server) {
   const userId = randomUUID();
   const token = randomBytes(32).toString('base64url');
   await server.pool.query('INSERT INTO users (id) VALUES ($1)', [userId]);
-  await server.pool.query(
-    'INSERT INTO auth_sessions (user_id, token_hash) VALUES ($1, $2)',
-    [userId, createHash('sha256').update(token).digest('hex')],
-  );
+  await insertWalletSession(server.pool, userId, token);
   const socket = createClient(t, server.url, {
     extraHeaders: {
       Origin: 'http://localhost:5173',

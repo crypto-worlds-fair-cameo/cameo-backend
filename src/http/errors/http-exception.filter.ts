@@ -27,18 +27,23 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exception.getStatus()
           : ErrorCodes.InternalServerError.statusCode;
 
-    // 재시도 계약이 있는 시즌 503만 중앙 정의와 정확히 일치할 때 공개합니다.
-    const publicSeasonUnavailable =
+    // 재시도 계약이 있는 시즌·NFT 503만 중앙 정의와 정확히 일치할 때 공개합니다.
+    const publicServiceUnavailable =
       exception instanceof BusinessError &&
-      exception.statusCode ===
-        ErrorCodes.SeasonTemporarilyUnavailable.statusCode &&
-      exception.code === ErrorCodes.SeasonTemporarilyUnavailable.code &&
-      exception.message === ErrorCodes.SeasonTemporarilyUnavailable.message;
+      [
+        ErrorCodes.SeasonTemporarilyUnavailable,
+        ErrorCodes.NftServiceUnavailable,
+      ].some(
+        (definition) =>
+          exception.statusCode === definition.statusCode &&
+          exception.code === definition.code &&
+          exception.message === definition.message,
+      );
 
     // 그 밖의 업무 오류는 4xx만 공개하고, 임의 5xx 상세는 기존처럼 숨깁니다.
     const publicError =
       exception instanceof BusinessError &&
-      (statusCode < 500 || publicSeasonUnavailable)
+      (statusCode < 500 || publicServiceUnavailable)
         ? exception
         : ErrorCodes.InternalServerError;
     let { code, message } = publicError;

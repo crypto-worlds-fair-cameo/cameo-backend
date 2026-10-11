@@ -44,7 +44,15 @@ lerna-debug.log*
 
 # Local agent skills
 /.agents/skills/
-/docs/superpowers/
+# Keep local planning notes ignored; share the season NFT implementation spec.
+/docs/superpowers/*
+!/docs/superpowers/specs/
+/docs/superpowers/specs/*
+!/docs/superpowers/specs/2026-10-09-season-canvas-nft-design.md
+!/docs/superpowers/plans/
+/docs/superpowers/plans/*
+!/docs/superpowers/plans/2026-10-09-season-canvas-nft.md
+!/docs/superpowers/plans/2026-10-09-season-canvas-nft/
 
 # temp directory
 .temp

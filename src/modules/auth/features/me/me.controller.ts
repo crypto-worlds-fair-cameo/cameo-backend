@@ -75,6 +75,10 @@ export class MeController {
           Math.ceil((result.sessionExpiryDeadline - performance.now()) / 1000),
         ) * 1000,
     });
-    return { user: result.user, session: result.session };
+    return {
+      user: result.user,
+      activeWallet: result.activeWallet,
+      session: result.session,
+    };
   }
 }

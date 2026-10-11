@@ -4,6 +4,7 @@ import type { CorsConfig } from './cors.config';
 import type { DatabaseConfig } from './database.config';
 import type { RateLimitConfig } from './rate-limit.config';
 import type { RealtimeConfig } from './realtime.config';
+import type { SeasonNftConfig } from './season-nft.config';
 
 export type AllConfigType = {
   app: AppConfig;
@@ -12,4 +13,5 @@ export type AllConfigType = {
   database: DatabaseConfig;
   realtime: RealtimeConfig;
   canvasSnapshot: CanvasSnapshotConfig;
+  seasonNft: SeasonNftConfig;
 };

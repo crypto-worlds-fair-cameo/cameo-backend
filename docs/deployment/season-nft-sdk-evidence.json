@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-11T08:49:37.982Z",
+  "network": "devnet",
+  "gitCommit": "ca0554bc1cd4644144bb07617b3c7fff588d941f",
+  "packages": {
+    "@ardrive/turbo-sdk": "2.1.0",
+    "@metaplex-foundation/mpl-core": "1.10.0",
+    "@metaplex-foundation/mpl-core-candy-machine": "0.3.0",
+    "@metaplex-foundation/umi": "0.8.10",
+    "@metaplex-foundation/umi-bundle-defaults": "0.8.10"
+  },
+  "programAddresses": {
+    "mplCore": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d",
+    "mplCoreCandyMachine": "CMACYFENjoBMHzapRXyo1JZkVS6EtaDDzkjMrmQLvr4J",
+    "mplCoreCandyGuard": "CMAGAKJ67e9hRZgfC5SFTbZH8MgEmtqazKXjmkaJjWTJ"
+  },
+  "gates": {
+    "LOCAL_SDK": "PASS",
+    "CHAIN_AUTHORITY": "NOT_RUN",
+    "STORAGE_RECOVERY": "NOT_RUN"
+  },
+  "tests": [
+    {
+      "id": "sdkExports",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "Required SDK operations are callable."
+    },
+    {
+      "id": "sdkVersions",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "Installed SDK versions match the lockfile contract."
+    },
+    {
+      "id": "programAddresses",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "SDK program IDs match official Core deployments."
+    },
+    {
+      "id": "proofFits100",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "A 100-wallet allow-list proof transaction fits 1232 bytes.",
+      "details": {
+        "byteLength": 600,
+        "proofNodeCount": 7
+      }
+    },
+    {
+      "id": "mintFits100",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "The paired guarded mint transaction fits 1232 bytes.",
+      "details": {
+        "byteLength": 699
+      }
+    },
+    {
+      "id": "payerRecipientSerialization",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "Signed mint message payer and encoded owner are the recipient."
+    },
+    {
+      "id": "signedItemRoundTrip",
+      "gate": "LOCAL_SDK",
+      "status": "PASS",
+      "signatures": [],
+      "reason": null,
+      "message": "Persisted signed bytes retain their locally derived data item ID.",
+      "details": {
+        "id": "fJ-L5EwAD30zVUqEX1eWjdSczQRw5jrUVDv_Co4ZDQ8",
+        "byteLength": 220
+      }
+    },
+    {
+      "id": "mintAfterLock",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "outsiderRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "secondMintRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "nameChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "uriChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "rootChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "supplyChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "transferWorks",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "remintAfterTransferRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "uploadItemRestoresSameId",
+      "gate": "STORAGE_RECOVERY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "remintAfterBurnRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "assetMetadataChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "collectionChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "mintAuthorityChangeRejected",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "noBypassGuardGroup",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "payerIsRecipient",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "feeEstimateMatchesInstructions",
+      "gate": "CHAIN_AUTHORITY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    },
+    {
+      "id": "permanentUploadRetrievable",
+      "gate": "STORAGE_RECOVERY",
+      "status": "NOT_RUN",
+      "signatures": [],
+      "reason": "External mutation was not requested. Re-run with --execute and isolated Devnet inputs."
+    }
+  ],
+  "overallStatus": "EXTERNAL_VALIDATION_PENDING"
+}

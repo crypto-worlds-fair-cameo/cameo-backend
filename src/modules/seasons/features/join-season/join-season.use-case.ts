@@ -69,8 +69,17 @@ export class JoinSeasonUseCase {
         );
         const time = await this.seasons.getCurrentTime(transaction);
 
-        // 기존 참가자는 현재 상태나 정원과 관계없이 참가 기록을 추가하지 않고 성공한다.
+        // 기존 참가자의 고정 주소가 현재 인증 지갑과 다르면 기록을 바꾸지 않고 거절한다.
         if (participation.isParticipant) {
+          if (
+            participation.participantWalletAddress !==
+            authentication.walletAddress
+          ) {
+            throw new BusinessError(
+              ErrorCodes.SeasonParticipationWalletMismatch,
+            );
+          }
+          // 같은 지갑의 재요청은 현재 상태나 정원과 관계없이 기존 참가 기록으로 성공한다.
           return toSeasonDetail(
             { ...season, participantCount: participation.participantCount },
             time,
@@ -89,6 +98,8 @@ export class JoinSeasonUseCase {
         await this.seasons.addParticipant(
           season.id,
           authentication.user.id,
+          authentication.walletAccountId,
+          authentication.walletAddress,
           time,
           transaction,
         );

@@ -14,7 +14,7 @@ async function fixture() {
   await pool.query(
     `INSERT INTO canvases
        (id, type, width, height, stroke_limit_per_user, starts_at, ends_at)
-     VALUES ($1, 'season', 10000, 10000, 10, '2026-10-01', '2026-11-01')`,
+     VALUES ($1, 'season', 10000, 10000, 10, '2026-10-01', '2026-10-31')`,
     [canvasId],
   );
   return { pool, userId, canvasId, strokeId: randomUUID() };

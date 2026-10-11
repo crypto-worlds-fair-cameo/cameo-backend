@@ -23,6 +23,11 @@ export type LoginResult =
       token: string;
       sessionExpiryDeadline: number;
       isNewUser: boolean;
+      activeWallet: Readonly<{
+        id: string;
+        chainNamespace: 'solana';
+        address: string;
+      }>;
       user: Readonly<{
         id: string;
         displayName: string | null;
@@ -135,6 +140,7 @@ export class LoginUseCase {
       const token = randomBytes(32).toString('base64url');
       const session = await this.sessions.create(
         account.id,
+        account.walletId,
         hashAuthSecret(token),
         time,
         transaction,
@@ -151,6 +157,11 @@ export class LoginUseCase {
         token,
         sessionExpiryDeadline,
         isNewUser,
+        activeWallet: {
+          id: account.walletId,
+          chainNamespace: identity.chainNamespace,
+          address: identity.address,
+        },
         user: {
           id: account.id,
           displayName: account.displayName,

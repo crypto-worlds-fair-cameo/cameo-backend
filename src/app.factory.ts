@@ -50,6 +50,21 @@ export function configureApp(app: INestApplication): INestApplication {
   app.enableShutdownHooks();
   app.useLogger(logger);
   app.enableCors(createCorsOptions(configService));
+  const escapedApiPrefix = apiPrefix
+    ? `${apiPrefix.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}/`
+    : '';
+  // 서명 거래 경로는 일반 JSON 파서보다 먼저 실제 wire body를 제한해 chunked·공백 payload도 8 KiB를 넘기지 못하게 한다.
+  const parseNftTransaction = express.json({ limit: 8192 });
+  app.use(
+    new RegExp(
+      `^/${escapedApiPrefix}seasons/[0-9a-f-]{36}/nft/claim-attempts/[0-9a-f-]{36}/transactions/?$`,
+      'iu',
+    ),
+    // Nest가 jsonParser 이름만 보고 전역 파서를 생략하지 않도록 경로 전용 파서를 감싼다.
+    function nftTransactionBodyParser(request, response, next) {
+      parseNftTransaction(request, response, next);
+    },
+  );
   const snapshotEnabled =
     configService.get('canvasSnapshot.enabled', { infer: true }) === true;
   if (snapshotEnabled) {

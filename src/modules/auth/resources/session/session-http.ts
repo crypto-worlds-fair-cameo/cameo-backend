@@ -9,6 +9,14 @@ class WalletResponse {
   address!: string;
 }
 
+class ActiveWalletResponse extends WalletResponse {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'solana', enum: ['solana'] })
+  declare chainNamespace: 'solana';
+}
+
 class AuthenticatedUserResponse {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -49,6 +57,12 @@ class SessionLifetimeResponse implements SessionLifetime {
 export class AuthenticatedSessionResponse {
   @ApiProperty({ type: AuthenticatedUserResponse })
   user!: AuthenticatedUserResponse;
+
+  @ApiProperty({
+    type: ActiveWalletResponse,
+    description: '현재 세션의 SIWS 서명을 검증한 Solana 지갑.',
+  })
+  activeWallet!: ActiveWalletResponse;
 
   @ApiProperty({ type: SessionLifetimeResponse })
   session!: SessionLifetimeResponse;

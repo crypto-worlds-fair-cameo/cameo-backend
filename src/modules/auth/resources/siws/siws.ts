@@ -11,7 +11,7 @@ export type SiwsSignInInput = Readonly<{
   statement: string;
   uri: string;
   version: '1';
-  chainId: 'mainnet';
+  chainId: 'mainnet' | 'devnet';
   nonce: string;
   issuedAt: string;
   expirationTime: string;
@@ -80,7 +80,7 @@ export function isSiwsSignInInput(value: unknown): value is SiwsSignInInput {
   if (
     input.statement !== SIWS_STATEMENT ||
     input.version !== '1' ||
-    input.chainId !== 'mainnet' ||
+    (input.chainId !== 'mainnet' && input.chainId !== 'devnet') ||
     !/^[0-9a-f]{64}$/.test(input.nonce as string) ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       input.requestId as string,
@@ -117,6 +117,7 @@ export function isSiwsSignInInput(value: unknown): value is SiwsSignInInput {
 export function createSiwsSignInInput(
   input: Readonly<{
     origin: string;
+    chainId: SiwsSignInInput['chainId'];
     challengeId: string;
     nonce: string;
     createdAt: Date;
@@ -128,7 +129,7 @@ export function createSiwsSignInInput(
     statement: SIWS_STATEMENT,
     uri: `${input.origin}/`,
     version: '1',
-    chainId: 'mainnet',
+    chainId: input.chainId,
     nonce: input.nonce,
     issuedAt: input.createdAt.toISOString(),
     expirationTime: input.expiresAt.toISOString(),
@@ -164,7 +165,7 @@ export function verifySiwsSignIn(
     account: {
       address,
       publicKey,
-      chains: ['solana:mainnet'],
+      chains: [`solana:${input.chainId}`],
       features: ['solana:signIn'],
     },
     signedMessage,

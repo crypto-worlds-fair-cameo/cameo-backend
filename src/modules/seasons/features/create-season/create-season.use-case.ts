@@ -80,6 +80,8 @@ export class CreateSeasonUseCase {
       await this.seasons.addCreatorParticipant(
         canvasId,
         user.id,
+        authentication.walletAccountId,
+        authentication.walletAddress,
         time,
         transaction,
       );

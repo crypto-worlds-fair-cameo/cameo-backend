@@ -22,6 +22,7 @@ import { CanvasSnapshotRunner } from './resources/canvas-snapshot/canvas-snapsho
 import { CanvasSnapshotRepository } from './resources/canvas-snapshot/canvas-snapshot.repository';
 import { ListCanvasHistoryController } from './features/list-canvas-history/list-canvas-history.controller';
 import { ListCanvasHistoryUseCase } from './features/list-canvas-history/list-canvas-history.use-case';
+import { FinalCanvasSnapshotReader } from './resources/canvas-snapshot/final-canvas-snapshot-reader';
 
 @Module({
   imports: [AuthModule, LoggerModule],
@@ -39,6 +40,7 @@ import { ListCanvasHistoryUseCase } from './features/list-canvas-history/list-ca
     CanvasSnapshotFiles,
     CanvasSnapshotRenderer,
     CanvasSnapshotRunner,
+    FinalCanvasSnapshotReader,
     CanvasStrokeUsageRepository,
     AppendStrokeGateway,
     AppendStrokeUseCase,
@@ -48,6 +50,6 @@ import { ListCanvasHistoryUseCase } from './features/list-canvas-history/list-ca
     BootstrapCanvasUseCase,
     ListCanvasHistoryUseCase,
   ],
-  exports: [CanvasDefinition, CanvasDrawing],
+  exports: [CanvasDefinition, CanvasDrawing, FinalCanvasSnapshotReader],
 })
 export class CanvasModule {}

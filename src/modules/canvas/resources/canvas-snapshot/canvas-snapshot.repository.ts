@@ -73,6 +73,19 @@ export type CanvasSnapshotHistoryPage = Readonly<{
   records: CanvasSnapshotHistoryRecord[];
 }>;
 
+export type FinalReadyCanvasSnapshot = Readonly<{
+  snapshot: CanvasSnapshotRecord;
+  lastChunkSequence: string;
+}>;
+
+/** final READY가 중복된 영구 메타데이터 손상을 일시적 조회 실패와 구분한다. */
+export class FinalReadyCanvasSnapshotMetadataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = FinalReadyCanvasSnapshotMetadataError.name;
+  }
+}
+
 const SNAPSHOT_COLUMNS = `
   id, canvas_id, through_sequence, renderer_version, width, height,
   status, is_final, image_key, continuation_key, image_bytes,
@@ -308,6 +321,42 @@ export class CanvasSnapshotRepository {
     return result.rows.map((row) => toSnapshot(row));
   }
 
+  /** 시즌 캔버스의 단일 FINAL+READY snapshot과 현재 chunk head를 함께 읽는다. */
+  async findFinalReady(
+    canvasId: string,
+  ): Promise<FinalReadyCanvasSnapshot | undefined> {
+    const result = await this.pool.query<
+      SnapshotRow & {
+        last_chunk_sequence: string;
+      }
+    >(
+      `SELECT cs.id, cs.canvas_id, c.type AS canvas_type,
+              cs.through_sequence, cs.renderer_version, cs.width, cs.height,
+              cs.status, cs.is_final, cs.image_key, cs.continuation_key,
+              cs.image_bytes, cs.continuation_bytes, cs.image_sha256,
+              cs.continuation_sha256, cs.continuation_schema_version,
+              cs.captured_at, cs.created_at, c.last_chunk_sequence
+       FROM canvas_snapshots cs
+       JOIN canvases c ON c.id = cs.canvas_id
+       WHERE cs.canvas_id = $1 AND c.type = 'season'
+         AND cs.status = 'READY' AND cs.is_final = true
+       ORDER BY cs.created_at DESC, cs.id DESC
+       LIMIT 2`,
+      [canvasId],
+    );
+    // final 결과가 둘 이상이면 어느 이미지도 확정 원본으로 선택하지 않는다.
+    if (result.rows.length > 1)
+      throw new FinalReadyCanvasSnapshotMetadataError(
+        'Canvas has multiple final READY snapshots.',
+      );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      snapshot: toSnapshot(row),
+      lastChunkSequence: row.last_chunk_sequence,
+    };
+  }
+
   /** DB 응답 유실 뒤 snapshotId로 READY·INVALID 어느 공개 결과든 다시 확인한다. */
   async findPublished(id: string): Promise<CanvasSnapshotRecord | undefined> {
     const result = await this.pool.query<SnapshotRow>(
@@ -362,6 +411,35 @@ export class CanvasSnapshotRepository {
     this.assertPublishInput(input);
     return this.transactions.run(async (transaction) => {
       const executor = getPgExecutor(this.pool, transaction);
+      let season:
+        | Readonly<{
+            cancelled_at: Date | null;
+            force_ended_at: Date | null;
+            observed_at: Date;
+          }>
+        | undefined;
+      if (input.isFinal) {
+        if (input.target.kind !== 'season')
+          throw new CanvasSnapshotPublicationRejected(
+            'Final canvas snapshot must match an ended season head.',
+          );
+        // 최종 시즌 공개는 동결과 같은 season→canvas 순서로 잠가 교착을 막는다.
+        const seasonResult = await executor.query<{
+          cancelled_at: Date | null;
+          force_ended_at: Date | null;
+          observed_at: Date;
+        }>(
+          `SELECT cancelled_at, force_ended_at,
+                  CURRENT_TIMESTAMP AS observed_at
+           FROM seasons WHERE canvas_id = $1 FOR UPDATE`,
+          [input.target.id],
+        );
+        season = seasonResult.rows[0];
+        if (!season || season.cancelled_at)
+          throw new CanvasSnapshotPublicationRejected(
+            'Cancelled or missing season cannot publish a final snapshot.',
+          );
+      }
       // 캔버스 head를 잠가 공개 검증과 INSERT 사이에 저장 경계가 바뀌지 않게 한다.
       const canvasResult = await executor.query<
         TargetRow & { last_chunk_sequence: string }
@@ -396,19 +474,7 @@ export class CanvasSnapshotRepository {
           throw new CanvasSnapshotPublicationRejected(
             'Final canvas snapshot must match an ended season head.',
           );
-        // 시즌 상태 행도 잠가 종료·취소 전환과 최종 결과 공개가 교차하지 않게 한다.
-        const seasonResult = await executor.query<{
-          cancelled_at: Date | null;
-          force_ended_at: Date | null;
-          observed_at: Date;
-        }>(
-          `SELECT cancelled_at, force_ended_at,
-                  CURRENT_TIMESTAMP AS observed_at
-           FROM seasons WHERE canvas_id = $1 FOR UPDATE`,
-          [input.target.id],
-        );
-        const season = seasonResult.rows[0];
-        if (!season || season.cancelled_at)
+        if (!season)
           throw new CanvasSnapshotPublicationRejected(
             'Cancelled or missing season cannot publish a final snapshot.',
           );

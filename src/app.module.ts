@@ -6,6 +6,7 @@ import corsConfig from './config/cors.config';
 import databaseConfig from './config/database.config';
 import rateLimitConfig from './config/rate-limit.config';
 import realtimeConfig from './config/realtime.config';
+import seasonNftConfig from './config/season-nft.config';
 import { DatabaseModule } from './database/database.module';
 import { HttpModule } from './http/http.module';
 import { LoggerModule } from './logging/logger.module';
@@ -13,6 +14,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { CanvasModule } from './modules/canvas/canvas.module';
 import { SeasonsModule } from './modules/seasons/seasons.module';
+import { SeasonNftsModule } from './modules/season-nfts/season-nfts.module';
 import { SystemModule } from './system/system.module';
 
 @Module({
@@ -26,6 +28,7 @@ import { SystemModule } from './system/system.module';
         databaseConfig,
         realtimeConfig,
         canvasSnapshotConfig,
+        seasonNftConfig,
       ],
     }),
     LoggerModule,
@@ -36,6 +39,7 @@ import { SystemModule } from './system/system.module';
     UserModule,
     CanvasModule,
     SeasonsModule,
+    SeasonNftsModule,
   ],
 })
 export class AppModule {}

@@ -1,8 +1,9 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { randomUUID, createHash } = require('node:crypto');
+const { randomUUID } = require('node:crypto');
 const { ConfigService } = require('@nestjs/config');
 const { startServer } = require('./server-fixture.cjs');
+const { insertWalletSession } = require('./wallet-session-fixture.cjs');
 
 /** 실제 HTTP와 임시 PostgreSQL로 커서 경계·공개 범위·응답 계약을 함께 검증한다. */
 test('canvas history HTTP contract', async (t) => {
@@ -26,10 +27,7 @@ test('canvas history HTTP contract', async (t) => {
     [season, creator],
   );
   const token = Buffer.alloc(32, 1).toString('base64url');
-  await pool.query(
-    'INSERT INTO auth_sessions (user_id,token_hash) VALUES ($1,$2)',
-    [creator, createHash('sha256').update(token).digest('hex')],
-  );
+  await insertWalletSession(pool, creator, token);
   const {
     authCookies,
   } = require('../../dist/modules/auth/resources/auth-cookie/auth-http');
@@ -183,10 +181,7 @@ test('canvas history HTTP contract', async (t) => {
         await pool.query('INSERT INTO users DEFAULT VALUES RETURNING id')
       ).rows[0].id;
       const outsiderToken = Buffer.alloc(32, 2).toString('base64url');
-      await pool.query(
-        'INSERT INTO auth_sessions (user_id,token_hash) VALUES ($1,$2)',
-        [outsider, createHash('sha256').update(outsiderToken).digest('hex')],
-      );
+      await insertWalletSession(pool, outsider, outsiderToken);
       assert.equal(
         (
           await get(season, '', {

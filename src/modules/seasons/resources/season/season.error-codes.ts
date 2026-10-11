@@ -20,6 +20,12 @@ export const SeasonErrorCodes = {
     message: 'Only the season creator can perform this action.',
     description: '시즌 개설자만 이 작업을 수행할 수 있습니다.',
   },
+  SeasonParticipationWalletMismatch: {
+    statusCode: 403,
+    code: 'SEASON_PARTICIPATION_WALLET_MISMATCH',
+    message: 'Use the wallet that originally joined this season.',
+    description: '현재 인증 지갑이 최초 참가 시 고정한 지갑과 다릅니다.',
+  },
   SeasonActiveLimitReached: {
     statusCode: 409,
     code: 'SEASON_ACTIVE_LIMIT_REACHED',

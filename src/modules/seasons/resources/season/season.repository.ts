@@ -81,29 +81,39 @@ export class SeasonRepository {
   async addCreatorParticipant(
     seasonId: string,
     creatorId: string,
+    walletAccountId: string,
+    walletAddress: string,
     time: Date,
     transaction: TransactionContext,
   ): Promise<void> {
     await getPgExecutor(this.pool, transaction).query(
-      `INSERT INTO season_participants (season_id, user_id, joined_at)
-       VALUES ($1, $2, $3)`,
-      [seasonId, creatorId, time],
+      `INSERT INTO season_participants
+         (season_id, user_id, wallet_account_id, wallet_address, joined_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [seasonId, creatorId, walletAccountId, walletAddress, time],
     );
   }
 
-  /** 잠근 시즌의 참가 수와 현재 사용자 참가 여부를 같은 스냅샷에서 읽는다. */
+  /** 잠근 시즌의 참가 수와 현재 사용자의 최초 참가 지갑을 같은 스냅샷에서 읽는다. */
   async readParticipation(
     seasonId: string,
     userId: string,
     transaction: TransactionContext,
-  ): Promise<{ isParticipant: boolean; participantCount: number }> {
+  ): Promise<{
+    isParticipant: boolean;
+    participantCount: number;
+    participantWalletAddress: string | null;
+  }> {
     // 시즌 행 잠금이 끝난 다음 별도 문장으로 실행해 잠금 대기 중 커밋된 참가를 읽는다.
     const result = await getPgExecutor(this.pool, transaction).query<{
       isParticipant: boolean;
       participantCount: number;
+      participantWalletAddress: string | null;
     }>(
       `SELECT count(*)::integer AS "participantCount",
-              COALESCE(bool_or(user_id = $2::uuid), false) AS "isParticipant"
+              COALESCE(bool_or(user_id = $2::uuid), false) AS "isParticipant",
+              max(wallet_address) FILTER (WHERE user_id = $2::uuid)
+                AS "participantWalletAddress"
        FROM season_participants WHERE season_id = $1`,
       [seasonId, userId],
     );
@@ -114,13 +124,16 @@ export class SeasonRepository {
   async addParticipant(
     seasonId: string,
     userId: string,
+    walletAccountId: string,
+    walletAddress: string,
     time: Date,
     transaction: TransactionContext,
   ): Promise<void> {
     await getPgExecutor(this.pool, transaction).query(
-      `INSERT INTO season_participants (season_id, user_id, joined_at)
-       VALUES ($1, $2, $3)`,
-      [seasonId, userId, time],
+      `INSERT INTO season_participants
+         (season_id, user_id, wallet_account_id, wallet_address, joined_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [seasonId, userId, walletAccountId, walletAddress, time],
     );
   }
 

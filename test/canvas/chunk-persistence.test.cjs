@@ -1,8 +1,12 @@
 const assert = require('node:assert/strict');
-const { randomUUID, randomBytes, createHash } = require('node:crypto');
+const { randomUUID, randomBytes } = require('node:crypto');
 const { test } = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 const { startServer, createClient, connect } = require('./server-fixture.cjs');
+const {
+  insertWalletSession,
+  insertWalletSessions,
+} = require('./wallet-session-fixture.cjs');
 
 const brush = {
   type: 'round',
@@ -26,10 +30,7 @@ async function member(t, server, identity) {
   const token = identity?.token ?? randomBytes(32).toString('base64url');
   if (!identity) {
     await server.pool.query('INSERT INTO users(id) VALUES($1)', [userId]);
-    await server.pool.query(
-      'INSERT INTO auth_sessions(user_id,token_hash) VALUES($1,$2)',
-      [userId, createHash('sha256').update(token).digest('hex')],
-    );
+    await insertWalletSession(server.pool, userId, token);
   }
   const socket = createClient(t, server.url, {
     extraHeaders: {
@@ -344,13 +345,7 @@ test('many completed strokes keep bounded state and an evicted stroke still dedu
   await server.pool.query('INSERT INTO users(id) SELECT unnest($1::uuid[])', [
     identities.map((i) => i.userId),
   ]);
-  await server.pool.query(
-    'INSERT INTO auth_sessions(user_id,token_hash) SELECT * FROM unnest($1::uuid[],$2::text[])',
-    [
-      identities.map((i) => i.userId),
-      identities.map((i) => createHash('sha256').update(i.token).digest('hex')),
-    ],
-  );
+  await insertWalletSessions(server.pool, identities);
   for (const identity of identities)
     await usecase.execute(
       identity.userId,

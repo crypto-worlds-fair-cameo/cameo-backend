@@ -10,6 +10,13 @@ export type SessionLifetime = Readonly<{
   absoluteExpiresAt: Date;
 }>;
 
+export type LockedSessionWallet = Readonly<{
+  sessionId: string;
+  walletAccountId: string;
+  walletAddress: string;
+  chainNamespace: 'solana';
+}>;
+
 @Injectable()
 export class SessionRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
@@ -25,19 +32,30 @@ export class SessionRepository {
     return result.rows[0]?.user_id;
   }
 
-  /** 사용자 잠금 이후 제출 토큰과 사용자에 대응하는 세션을 다시 읽고 잠근다. */
+  /** 사용자 잠금 이후 세션과 그 사용자 소유 Solana 지갑을 함께 검증하고 세션을 잠근다. */
   async lockForAuthentication(
     tokenHash: string,
     userId: string,
     transaction: TransactionContext,
-  ): Promise<string | undefined> {
+  ): Promise<LockedSessionWallet | undefined> {
     const result = await getPgExecutor(this.pool, transaction).query<{
-      id: string;
+      sessionId: string;
+      walletAccountId: string;
+      walletAddress: string;
+      chainNamespace: 'solana';
     }>(
-      'SELECT id FROM auth_sessions WHERE token_hash = $1 AND user_id = $2 FOR UPDATE',
+      `SELECT s.id AS "sessionId", w.id AS "walletAccountId",
+              w.address AS "walletAddress",
+              w.chain_namespace AS "chainNamespace"
+       FROM auth_sessions s
+       JOIN user_wallets w
+         ON w.user_id = s.user_id AND w.id = s.wallet_account_id
+        AND w.chain_namespace = 'solana'
+       WHERE s.token_hash = $1 AND s.user_id = $2
+       FOR UPDATE OF s`,
       [tokenHash, userId],
     );
-    return result.rows[0]?.id;
+    return result.rows[0];
   }
 
   /** 모든 행 잠금 뒤 DB 시각을 한 번 평가하며, 만료의 정밀도를 DB에서 유지한다. */
@@ -82,9 +100,10 @@ export class SessionRepository {
     return result.rows[0];
   }
 
-  /** DB 판정 시각 기준으로 7일·절대 30일 세션을 생성하며 토큰 해시만 저장한다. */
+  /** DB 판정 시각 기준 수명과 SIWS로 검증한 사용자 소유 지갑을 새 세션에 고정한다. */
   async create(
     userId: string,
+    walletAccountId: string,
     tokenHash: string,
     time: Date,
     transaction: TransactionContext,
@@ -94,10 +113,12 @@ export class SessionRepository {
       transaction,
     ).query<SessionLifetime>(
       `INSERT INTO auth_sessions
-         (user_id, token_hash, created_at, last_seen_at, expires_at, absolute_expires_at)
-       VALUES ($1, $2, $3, $3, $3::timestamptz + INTERVAL '7 days', $3::timestamptz + INTERVAL '30 days')
+         (user_id, wallet_account_id, token_hash, created_at, last_seen_at,
+          expires_at, absolute_expires_at)
+       VALUES ($1, $2, $3, $4, $4, $4::timestamptz + INTERVAL '7 days',
+               $4::timestamptz + INTERVAL '30 days')
        RETURNING expires_at AS "expiresAt", absolute_expires_at AS "absoluteExpiresAt"`,
-      [userId, tokenHash, time],
+      [userId, walletAccountId, tokenHash, time],
     );
     return result.rows[0];
   }

@@ -13,6 +13,9 @@ import { JoinSeasonController } from './features/join-season/join-season.control
 import { JoinSeasonUseCase } from './features/join-season/join-season.use-case';
 import { ListSeasonsController } from './features/list-seasons/list-seasons.controller';
 import { ListSeasonsUseCase } from './features/list-seasons/list-seasons.use-case';
+import { ListParticipatedSeasonsController } from './features/list-participated-seasons/list-participated-seasons.controller';
+import { ListParticipatedSeasonsUseCase } from './features/list-participated-seasons/list-participated-seasons.use-case';
+import { ParticipatedSeasonsQuery } from './features/list-participated-seasons/participated-seasons.query';
 import { SeasonRepository } from './resources/season/season.repository';
 
 @Module({
@@ -21,6 +24,7 @@ import { SeasonRepository } from './resources/season/season.repository';
     CreateSeasonController,
     CancelSeasonController,
     EndSeasonController,
+    ListParticipatedSeasonsController,
     GetSeasonController,
     JoinSeasonController,
     ListSeasonsController,
@@ -29,6 +33,8 @@ import { SeasonRepository } from './resources/season/season.repository';
     CreateSeasonUseCase,
     CancelSeasonUseCase,
     EndSeasonUseCase,
+    ListParticipatedSeasonsUseCase,
+    ParticipatedSeasonsQuery,
     GetSeasonUseCase,
     JoinSeasonUseCase,
     ListSeasonsUseCase,

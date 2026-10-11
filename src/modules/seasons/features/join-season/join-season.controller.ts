@@ -77,6 +77,7 @@ export class JoinSeasonController {
       AuthErrorCodes.AuthSessionInvalid,
       AuthErrorCodes.AuthUserUnavailable,
       SeasonErrorCodes.SeasonNotFound,
+      SeasonErrorCodes.SeasonParticipationWalletMismatch,
       SeasonErrorCodes.SeasonStateConflict,
       SeasonErrorCodes.SeasonCapacityReached,
     ],

@@ -11,6 +11,9 @@ export type SessionAuthenticationResult =
       token: string;
       sessionId: string;
       time: Date;
+      walletAccountId: string;
+      walletAddress: string;
+      chainNamespace: 'solana';
       user: Readonly<{
         id: string;
         displayName: string | null;
@@ -40,16 +43,17 @@ export class SessionAuthenticator {
     // 로그인과 같은 사용자 후 세션 순서를 지켜 잠금 대기의 순환을 피한다.
     const account = await this.accounts.lockUserById(userId, transaction);
     if (!account) return { outcome: 'invalid' };
-    const sessionId = await this.sessions.lockForAuthentication(
+    const session = await this.sessions.lockForAuthentication(
       tokenHash,
       userId,
       transaction,
     );
-    if (!sessionId) return { outcome: 'invalid' };
+    // 세션에 고정한 Solana 지갑이 사용자에게 속하지 않으면 구세션과 동일하게 인증을 거절한다.
+    if (!session) return { outcome: 'invalid' };
 
     // 잠금을 모두 얻은 뒤 만료·폐기·계정 상태를 판정해 기다리는 동안의 변경도 반영한다.
     const state = await this.sessions.inspectAtCurrentTime(
-      sessionId,
+      session.sessionId,
       transaction,
     );
     if (!state?.usable) return { outcome: 'invalid' };
@@ -58,8 +62,11 @@ export class SessionAuthenticator {
     return {
       outcome: 'authenticated',
       token,
-      sessionId,
+      sessionId: session.sessionId,
       time: state.time,
+      walletAccountId: session.walletAccountId,
+      walletAddress: session.walletAddress,
+      chainNamespace: session.chainNamespace,
       user: {
         id: account.id,
         displayName: account.displayName,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { constants, promises as fs } from 'node:fs';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AllConfigType } from '../../../../config/config.type';
@@ -17,6 +17,16 @@ const ORPHAN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+/** 저장 원본의 경로·형식·내용 불일치를 일시적 파일 시스템 장애와 구분한다. */
+export class CanvasSnapshotFileValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = CanvasSnapshotFileValidationError.name;
+  }
+}
+
+type ValidationErrorFactory = (message: string) => Error;
 
 type ContinuationFile = {
   schemaVersion?: unknown;
@@ -114,6 +124,75 @@ export class CanvasSnapshotFiles {
       // 파일이 사라진 경우만 손상 후보로 반환하고 권한·I/O 장애는 호출자가 운영 오류로 다룬다.
       if (this.errorCode(error) === 'ENOENT') return false;
       throw error;
+    }
+  }
+
+  /** 공개 메타데이터의 크기·hash와 일치하는 PNG만 안전한 저장 루트에서 읽는다. */
+  async readImage(record: CanvasSnapshotRecord): Promise<Buffer> {
+    await this.requireInitialized();
+    let expectedBytes: bigint;
+    try {
+      expectedBytes = BigInt(record.imageBytes);
+    } catch (error: unknown) {
+      throw new CanvasSnapshotFileValidationError(
+        'Canvas snapshot image byte length is invalid.',
+        { cause: error },
+      );
+    }
+    if (
+      expectedBytes <= 0n ||
+      expectedBytes > BigInt(MAX_SNAPSHOT_IMAGE_BYTES)
+    ) {
+      throw new CanvasSnapshotFileValidationError(
+        'Canvas snapshot image byte length is invalid.',
+      );
+    }
+    const validationError: ValidationErrorFactory = (message) =>
+      new CanvasSnapshotFileValidationError(message);
+    const file = this.resolveKey(record.imageKey, validationError);
+    let realFile: string;
+    try {
+      realFile = await fs.realpath(file);
+    } catch (error: unknown) {
+      if (!this.deterministicFileValidationError(error)) throw error;
+      throw new CanvasSnapshotFileValidationError(
+        'Canvas snapshot image path is invalid.',
+        { cause: error },
+      );
+    }
+    this.assertInsideRoot(realFile, validationError);
+    // 검증한 경로가 symlink로 교체돼도 저장 루트 밖 파일을 열지 않게 최종 경로의 symlink를 거절한다.
+    let handle;
+    try {
+      handle = await fs.open(
+        realFile,
+        constants.O_RDONLY | constants.O_NOFOLLOW,
+      );
+    } catch (error: unknown) {
+      if (!this.deterministicFileValidationError(error)) throw error;
+      throw new CanvasSnapshotFileValidationError(
+        'Canvas snapshot image path is invalid.',
+        { cause: error },
+      );
+    }
+    try {
+      const stat = await handle.stat({ bigint: true });
+      if (!stat.isFile() || stat.size !== expectedBytes)
+        throw new CanvasSnapshotFileValidationError(
+          'Canvas snapshot image byte length does not match.',
+        );
+      const bytes = await handle.readFile();
+      if (BigInt(bytes.byteLength) !== expectedBytes)
+        throw new CanvasSnapshotFileValidationError(
+          'Canvas snapshot image byte length changed while reading.',
+        );
+      if (this.bufferHash(bytes) !== record.imageSha256)
+        throw new CanvasSnapshotFileValidationError(
+          'Canvas snapshot image hash does not match.',
+        );
+      return bytes;
+    } finally {
+      await handle.close();
     }
   }
 
@@ -291,16 +370,19 @@ export class CanvasSnapshotFiles {
     await this.initialize();
   }
 
-  private resolveKey(key: string): string {
+  private resolveKey(
+    key: string,
+    invalid: ValidationErrorFactory = (message) => new Error(message),
+  ): string {
     if (!this.initializedRoot)
       throw new Error('Canvas snapshot storage is not initialized.');
-    this.assertRelativeKey(key);
+    this.assertRelativeKey(key, invalid);
     const resolved = path.resolve(this.initializedRoot, key);
     if (
       resolved !== this.initializedRoot &&
       !resolved.startsWith(`${this.initializedRoot}${path.sep}`)
     )
-      throw new Error('Canvas snapshot key escaped storage root.');
+      throw invalid('Canvas snapshot key escaped storage root.');
     return resolved;
   }
 
@@ -308,14 +390,17 @@ export class CanvasSnapshotFiles {
     return this.resolveKey(`.tmp/snapshots/${id}`);
   }
 
-  private assertRelativeKey(key: string): void {
+  private assertRelativeKey(
+    key: string,
+    invalid: ValidationErrorFactory = (message) => new Error(message),
+  ): void {
     if (
       key.length === 0 ||
       path.isAbsolute(key) ||
       key.includes('\\') ||
       key.split('/').includes('..')
     )
-      throw new Error('Canvas snapshot key is invalid.');
+      throw invalid('Canvas snapshot key is invalid.');
   }
 
   private directoryKey(target: CanvasTarget, id: string): string {
@@ -623,10 +708,13 @@ export class CanvasSnapshotFiles {
     this.assertInsideRoot(realDirectory);
   }
 
-  private assertInsideRoot(value: string): void {
+  private assertInsideRoot(
+    value: string,
+    invalid: ValidationErrorFactory = (message) => new Error(message),
+  ): void {
     const root = this.initializedRoot!;
     if (value !== root && !value.startsWith(`${root}${path.sep}`))
-      throw new Error('Canvas snapshot path escaped storage root.');
+      throw invalid('Canvas snapshot path escaped storage root.');
   }
 
   private async pathExists(value: string): Promise<boolean> {
@@ -670,6 +758,10 @@ export class CanvasSnapshotFiles {
     return this.record(error) && typeof error.code === 'string'
       ? error.code
       : undefined;
+  }
+
+  private deterministicFileValidationError(error: unknown): boolean {
+    return ['ENOENT', 'ENOTDIR', 'ELOOP'].includes(this.errorCode(error) ?? '');
   }
 
   private record(value: unknown): value is Record<string, any> {

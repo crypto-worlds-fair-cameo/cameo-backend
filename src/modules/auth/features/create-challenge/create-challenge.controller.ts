@@ -35,8 +35,12 @@ class SiwsSignInInputResponse implements SiwsSignInInput {
   @ApiProperty({ enum: ['1'] })
   version!: '1';
 
-  @ApiProperty({ enum: ['mainnet'] })
-  chainId!: 'mainnet';
+  @ApiProperty({
+    enum: ['mainnet', 'devnet'],
+    description:
+      'SOLANA_NETWORK=devnet이면 devnet, mainnet-beta 또는 미설정이면 mainnet입니다. 지갑의 네트워크를 같은 값으로 선택하세요.',
+  })
+  chainId!: SiwsSignInInput['chainId'];
 
   @ApiProperty({ pattern: '^[0-9a-f]{64}$' })
   nonce!: string;

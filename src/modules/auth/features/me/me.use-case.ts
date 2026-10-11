@@ -14,6 +14,11 @@ export type MeResult =
       outcome: 'authenticated';
       token: string;
       sessionExpiryDeadline: number;
+      activeWallet: Readonly<{
+        id: string;
+        chainNamespace: 'solana';
+        address: string;
+      }>;
       user: Readonly<{
         id: string;
         displayName: string | null;
@@ -68,6 +73,11 @@ export class MeUseCase {
         outcome: 'authenticated',
         token: authentication.token,
         sessionExpiryDeadline,
+        activeWallet: {
+          id: authentication.walletAccountId,
+          chainNamespace: authentication.chainNamespace,
+          address: authentication.walletAddress,
+        },
         user: {
           ...authentication.user,
           wallets,

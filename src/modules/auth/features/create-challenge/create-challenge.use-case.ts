@@ -43,6 +43,12 @@ export class CreateChallengeUseCase {
     });
     assertAuthOrigin(origin, allowedOrigins);
 
+    // 지갑이 사용하는 배포 네트워크로 서명을 요청한다. 미설정 환경은 기존 mainnet 정책을 유지한다.
+    const chainId =
+      this.config.get('seasonNft.network', { infer: true }) === 'devnet'
+        ? 'devnet'
+        : 'mainnet';
+
     // 이 값은 이후 서명 요청이 챌린지를 발급받은 브라우저에서 왔는지 확인할 때 쓴다.
     // 기존 값을 유지하면 앞서 발급한 미사용 챌린지도 같은 브라우저에서 사용할 수 있다.
     const binding = isAuthSecret(browserBinding)
@@ -60,6 +66,7 @@ export class CreateChallengeUseCase {
       );
       const signInInput = createSiwsSignInInput({
         origin,
+        chainId,
         challengeId,
         nonce,
         createdAt,
