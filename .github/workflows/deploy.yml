@@ -1,10 +1,17 @@
 name: Deploy backend
 
-# 자동으로 배포되지 않는다. GitHub의 Actions 탭 → "Deploy backend" → "Run workflow" 버튼을 눌렀을 때만
-# 운영 서버(api.cameoprint.com)에 접속해 서버에 설치된 배포 스크립트(/home/cameo/deploy.sh)를 실행한다.
-# DB 변경 파일(db/migrations)이 새로 생긴 경우 스크립트가 배포를 멈추므로, 그때는 서버에서 수동으로 적용한다.
+# main에 푸시하고 CI(검사)가 통과하면 자동으로 운영 서버(api.cameoprint.com)에 배포한다.
+# 서버에 설치된 배포 스크립트(/home/cameo/deploy.sh)를 SSH로 실행하는 방식이다.
+# - CI가 실패하면 배포하지 않는다.
+# - DB 변경 파일(db/migrations)이 새로 생긴 경우 스크립트가 배포를 멈추므로, 그때는 서버에서 수동으로 적용한다.
+# - 배포나 서비스 확인이 실패하면 스크립트가 이전 버전으로 되돌린다.
+# - 자동 배포를 끄고 싶으면 아래 workflow_run 블록을 지우면 된다. 그러면 Actions 탭의 "Run workflow" 버튼으로만 배포한다.
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -17,8 +24,11 @@ concurrency:
 jobs:
   deploy:
     name: 운영 서버 배포
-    # 반드시 main 브랜치에서만 실행한다.
-    if: github.ref == 'refs/heads/main'
+    # main에서만 실행한다. 자동 실행은 main 푸시에 대한 CI가 성공했을 때만 한다. 버튼으로는 언제든 실행할 수 있다.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
