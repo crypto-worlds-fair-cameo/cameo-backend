@@ -27,12 +27,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exception.getStatus()
           : ErrorCodes.InternalServerError.statusCode;
 
-    // 재시도 계약이 있는 시즌·NFT 503만 중앙 정의와 정확히 일치할 때 공개합니다.
+    // 재시도 계약이 있는 시즌·NFT 503과 프로필 사진 미설정 503만 중앙 정의와 정확히 일치할 때 공개합니다.
     const publicServiceUnavailable =
       exception instanceof BusinessError &&
       [
         ErrorCodes.SeasonTemporarilyUnavailable,
         ErrorCodes.NftServiceUnavailable,
+        ErrorCodes.UserProfileImageUnavailable,
       ].some(
         (definition) =>
           exception.statusCode === definition.statusCode &&

@@ -14,7 +14,7 @@
     "start:prod": "node --enable-source-maps dist/main.js",
     "lint": "oxlint --deny-warnings src",
     "typecheck": "tsc --noEmit --incremental false",
-    "test:realtime": "npm run build && node --test --test-concurrency=1 test/canvas/*.test.cjs",
+    "test:realtime": "npm run build && node --test --test-concurrency=1 test/canvas/*.test.cjs test/user/*.test.cjs",
     "test:nft": "npm run build && node --test --test-concurrency=1 test/season-nft/*.test.cjs",
     "nft:verify:devnet": "npm run build && node scripts/season-nft/verify-devnet.cjs",
     "nft:preflight": "node scripts/season-nft/preflight.cjs",

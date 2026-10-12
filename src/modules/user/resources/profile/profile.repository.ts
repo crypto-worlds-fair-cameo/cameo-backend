@@ -26,4 +26,23 @@ export class ProfileRepository {
     if (!result.rows[0]) throw new Error('Authenticated user is missing');
     return result.rows[0];
   }
+
+  /** 세션 인증으로 잠근 사용자의 프로필 사진 주소를 새로 저장한 파일 주소로 바꾼다. */
+  async updateAvatarUrl(
+    userId: string,
+    avatarUrl: string,
+    time: Date,
+    transaction: TransactionContext,
+  ): Promise<Readonly<{ id: string; avatarUrl: string }>> {
+    const result = await getPgExecutor(this.pool, transaction).query<{
+      id: string;
+      avatarUrl: string;
+    }>(
+      `UPDATE users SET avatar_url = $2, updated_at = $3
+       WHERE id = $1 RETURNING id, avatar_url AS "avatarUrl"`,
+      [userId, avatarUrl, time],
+    );
+    if (!result.rows[0]) throw new Error('Authenticated user is missing');
+    return result.rows[0];
+  }
 }
