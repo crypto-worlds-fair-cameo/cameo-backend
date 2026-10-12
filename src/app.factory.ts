@@ -19,6 +19,11 @@ import {
   createAuthCacheControlMiddleware,
 } from './modules/auth/resources/auth-cookie/auth-http';
 import { createLoginMediaTypeMiddleware } from './modules/auth/features/login/login-media-type.middleware';
+import {
+  PROFILE_IMAGE_MAX_BYTES,
+  PROFILE_IMAGE_MEDIA_TYPES,
+} from './modules/user/resources/profile-image/profile-image-format';
+import { PROFILE_IMAGE_PUBLIC_PATH } from './modules/user/resources/profile-image/profile-image.storage';
 
 /** HTTP·Swagger와 같은 포트의 관람 소켓을 구성하고 인증 응답에 캐시 금지를 적용한다. */
 export function configureApp(app: INestApplication): INestApplication {
@@ -65,6 +70,51 @@ export function configureApp(app: INestApplication): INestApplication {
       parseNftTransaction(request, response, next);
     },
   );
+  // 프로필 사진은 JSON 대신 PNG·JPEG 원본을 받으므로 해당 경로에서만 2MB까지 바이트로 읽는다.
+  const parseProfileImage = express.raw({
+    type: [...PROFILE_IMAGE_MEDIA_TYPES],
+    limit: PROFILE_IMAGE_MAX_BYTES,
+  });
+  app.use(
+    new RegExp(`^/${escapedApiPrefix}users/me/profile-image/?$`, 'iu'),
+    function profileImageBodyParser(request, response, next) {
+      parseProfileImage(request, response, next);
+    },
+  );
+  const profileImageRoot = configService.get('profileImage.storageRoot', {
+    infer: true,
+  });
+  const profileImageBaseUrl = configService.get('profileImage.publicBaseUrl', {
+    infer: true,
+  });
+  if (profileImageRoot && profileImageBaseUrl) {
+    // 사용자 폴더 아래 사진 파일만 노출하고 임시 파일과 다른 경로는 404로 숨긴다.
+    // 바뀌어 지워진 사진도 공통 오류 처리(500)로 넘기지 않고 같은 404로 끝낸다.
+    const notFound: express.RequestHandler = (_req, res) => {
+      res.sendStatus(404);
+    };
+    expressApp.use(
+      new URL(profileImageBaseUrl).pathname.replace(/\/$/, ''),
+      (req, res, next) => {
+        if (!PROFILE_IMAGE_PUBLIC_PATH.test(req.path)) {
+          notFound(req, res, next);
+          return;
+        }
+        next();
+      },
+      express.static(profileImageRoot, {
+        index: false,
+        dotfiles: 'deny',
+        immutable: true,
+        maxAge: '1y',
+        setHeaders: (res) => {
+          // 프론트 origin의 img 태그가 읽을 수 있게 한다. 사진마다 새 주소를 쓰므로 오래 캐시한다.
+          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        },
+      }),
+      notFound,
+    );
+  }
   const snapshotEnabled =
     configService.get('canvasSnapshot.enabled', { infer: true }) === true;
   if (snapshotEnabled) {
@@ -126,7 +176,7 @@ export function configureApp(app: INestApplication): INestApplication {
         '지갑 로그인: 챌린지 발급 → 지갑의 solana:signIn 호출 → 원본 메시지와 서명을 Base64로 제출 → 현재 사용자 조회.\n\n' +
         '인증은 서버가 발급하는 HttpOnly 쿠키를 사용합니다. 브라우저 요청에는 credentials: include가 필요합니다. ' +
         '쿠키는 SameSite=Lax, Path=/이며 운영 환경에서는 Secure를 적용합니다. 인증 응답은 Cache-Control: no-store를 사용합니다. ' +
-        '인증 POST, 사용자 프로필 PATCH, 시즌 생성·참가·취소·종료 POST의 Origin은 CORS_ORIGIN_LIST에 등록되어야 합니다. Swagger에서 실행할 때도 문서 페이지의 출처에 같은 규칙이 적용됩니다. ' +
+        '인증 POST, 사용자 프로필 PATCH·PUT, 시즌 생성·참가·취소·종료 POST의 Origin은 CORS_ORIGIN_LIST에 등록되어야 합니다. Swagger에서 실행할 때도 문서 페이지의 출처에 같은 규칙이 적용됩니다. ' +
         'Origin과 Cookie 헤더는 브라우저가 관리하며 Swagger 입력으로 임의 설정할 수 없습니다.\n\n' +
         '시즌 목록과 상세는 공개이며 세션 쿠키는 선택 사항입니다. 로그인 사용자는 진행 중인 시즌에만 신규 참가할 수 있고, 시즌 캔버스는 canvasKey handshake로 공개 관람과 sync를 제공합니다. ' +
         'SEASON_DRAWING_ENABLED=true이면 진행 중인 시즌의 참가자는 실시간 그림 입력도 사용할 수 있으며 기본값은 false입니다. NFT·cNFT 발행과 결제는 별도 후속 설계 대상입니다.',

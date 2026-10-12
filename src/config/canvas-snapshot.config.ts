@@ -32,7 +32,7 @@ function positiveInteger(name: string, fallback?: number): number {
   return value;
 }
 
-function optionalAbsolutePath(name: string): string | undefined {
+export function optionalAbsolutePath(name: string): string | undefined {
   const source = process.env[name];
   if (source === undefined || source.trim().length === 0) return undefined;
   if (!path.isAbsolute(source))
@@ -40,7 +40,7 @@ function optionalAbsolutePath(name: string): string | undefined {
   return source;
 }
 
-function optionalPublicBaseUrl(name: string): string | undefined {
+export function optionalPublicBaseUrl(name: string): string | undefined {
   const source = process.env[name];
   if (source === undefined || source.trim().length === 0) return undefined;
   const parsed = new URL(source);

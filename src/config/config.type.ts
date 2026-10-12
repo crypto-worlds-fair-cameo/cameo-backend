@@ -2,6 +2,7 @@ import type { AppConfig } from './app.config';
 import type { CanvasSnapshotConfig } from './canvas-snapshot.config';
 import type { CorsConfig } from './cors.config';
 import type { DatabaseConfig } from './database.config';
+import type { ProfileImageConfig } from './profile-image.config';
 import type { RateLimitConfig } from './rate-limit.config';
 import type { RealtimeConfig } from './realtime.config';
 import type { SeasonNftConfig } from './season-nft.config';
@@ -14,4 +15,5 @@ export type AllConfigType = {
   realtime: RealtimeConfig;
   canvasSnapshot: CanvasSnapshotConfig;
   seasonNft: SeasonNftConfig;
+  profileImage: ProfileImageConfig;
 };
