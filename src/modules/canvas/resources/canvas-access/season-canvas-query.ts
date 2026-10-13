@@ -6,7 +6,10 @@ import type { TransactionContext } from '../../../../database/transaction/transa
 import type { LifecycleSnapshot } from '../canvas-drawing/canvas-drawing';
 
 export type SeasonCanvasFacts = LifecycleSnapshot &
-  Readonly<{ isParticipant: boolean }>;
+  Readonly<{
+    isParticipant: boolean;
+    entryRule: 'anyone' | 'wallet_holders';
+  }>;
 
 /** Canvas가 시즌 공개 범위와 참가 사실을 읽는 전용 쿼리다. */
 @Injectable()
@@ -26,6 +29,7 @@ export class SeasonCanvasQuery {
       `SELECT s.creator_id AS "creatorId", c.starts_at AS "startsAt",
               c.ends_at AS "endsAt", s.cancelled_at AS "cancelledAt",
               s.force_ended_at AS "forceEndedAt",
+              s.entry_rule AS "entryRule",
               date_trunc('milliseconds', clock_timestamp()) AS "observedAt",
               CASE WHEN $2::uuid IS NULL THEN false ELSE EXISTS (
                 SELECT 1 FROM season_participants p
@@ -37,6 +41,17 @@ export class SeasonCanvasQuery {
       [canvasId, userId ?? null],
     );
     return result.rows[0];
+  }
+
+  /** 사용자가 이 시즌에서 쓴 획 수. 중단된 획도 사용으로 기록되므로 함께 센다. */
+  async strokesUsed(canvasId: string, userId: string): Promise<number> {
+    const result = await this.pool.query<{ used: number }>(
+      `SELECT count(*)::integer AS used
+       FROM canvas_stroke_usages
+       WHERE canvas_id = $1 AND user_id = $2`,
+      [canvasId, userId],
+    );
+    return result.rows[0].used;
   }
 
   /** lifecycle transaction이 변경할 시즌 행만 잠그고 상태 판정은 뒤의 admission 조회에 맡긴다. */

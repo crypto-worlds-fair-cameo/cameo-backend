@@ -51,10 +51,12 @@ type ValidEligibility = Readonly<{
   publicKey: PublicKey;
 }>;
 
+const MAX_ELIGIBLE_CONTRIBUTORS = 100;
+
 function validateEligibility(
   rows: readonly SeasonNftEligibilitySourceRow[],
 ): ValidEligibility[] | null {
-  if (rows.length > 100) return null;
+  if (rows.length > MAX_ELIGIBLE_CONTRIBUTORS) return null;
   const wallets = new Set<string>();
   const valid: ValidEligibility[] = [];
   for (const row of rows) {
@@ -170,6 +172,19 @@ export class PrepareSeasonNftUseCase {
         candidate.version,
         SeasonNftInternalErrorCodes.SourceIneligible,
         'Season NFT source is no longer eligible.',
+      );
+      return {
+        releaseId: candidate.releaseId,
+        status: blocked ? 'BLOCKED' : 'RETRY',
+      };
+    }
+    // 정원 무제한 시즌은 유효 획 참여자가 100명을 넘을 수 있으며, 이 시즌은 NFT를 발행하지 않는다.
+    if (source.eligibility.length > MAX_ELIGIBLE_CONTRIBUTORS) {
+      const blocked = await this.block(
+        candidate.releaseId,
+        candidate.version,
+        SeasonNftInternalErrorCodes.TooManyContributors,
+        'Season NFT contributors exceed the claim limit.',
       );
       return {
         releaseId: candidate.releaseId,

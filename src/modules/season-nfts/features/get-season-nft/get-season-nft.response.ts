@@ -45,8 +45,15 @@ export class SeasonNftResponse implements SeasonNftView {
 
   @ApiProperty({
     type: String,
-    enum: ['CANCELLED', 'FORCE_ENDED', 'FEATURE_DISABLED'],
+    enum: [
+      'CANCELLED',
+      'FORCE_ENDED',
+      'FEATURE_DISABLED',
+      'TOO_MANY_CONTRIBUTORS',
+    ],
     nullable: true,
+    description:
+      'TOO_MANY_CONTRIBUTORS는 유효 획 참여자가 100명을 넘어 NFT를 발행하지 않는 정원 무제한 시즌입니다.',
   })
   reason!: SeasonNftView['reason'];
 

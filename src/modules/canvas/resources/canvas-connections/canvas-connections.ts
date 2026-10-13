@@ -219,11 +219,18 @@ export class CanvasConnections
               retryable: false,
               retryAfterMs: 0,
             } as const)
-          : ({
-              reason: 'realtime_unavailable',
-              retryable: true,
-              retryAfterMs: 1000,
-            } as const);
+          : // 지갑 보유자 전용 시즌의 손님 연결은 로그인 전까지 재시도해도 열리지 않는다.
+            error instanceof CanvasStrokeError && error.code === 'AUTH_REQUIRED'
+            ? ({
+                reason: 'connection_policy',
+                retryable: false,
+                retryAfterMs: 0,
+              } as const)
+            : ({
+                reason: 'realtime_unavailable',
+                retryable: true,
+                retryAfterMs: 1000,
+              } as const);
       this.reset(socket, unavailable);
     } finally {
       this.connecting.delete(socket.id);
@@ -437,6 +444,7 @@ export class CanvasConnections
         width: binding.target.width,
         height: binding.target.height,
         strokeLimitPerUser: binding.target.strokeLimitPerUser,
+        strokesUsed: season.strokesUsed ?? null,
         startsAt: season.startsAt.toISOString(),
         endsAt: season.endsAt.toISOString(),
         cancelledAt: season.cancelledAt?.toISOString() ?? null,

@@ -54,7 +54,7 @@ export class JoinSeasonController {
   @ApiOperation({
     summary: '진행 중 시즌 참가',
     description:
-      '로그인 세션 쿠키와 허용된 Origin이 필요합니다. 진행 중인 시즌에 빈자리가 있으면 참가자를 등록합니다. 이미 참가한 사용자는 시즌 상태나 정원과 관계없이 참가 기록을 추가하지 않고 최신 상세를 받습니다. 취소된 시즌은 개설자에게만 기존 자동 참가 기록을 포함한 상세를 반환합니다. 본문은 없습니다.',
+      '로그인 세션 쿠키와 허용된 Origin이 필요합니다. 진행 중인 무료 시즌에 빈자리가 있으면 참가자를 등록합니다. 정원이 null이면 무제한입니다. 입장료가 있는 시즌은 SEASON_ENTRY_PAYMENT_REQUIRED를 반환하며 입장료 결제 API로 참가합니다. 이미 참가한 사용자는 시즌 상태나 정원과 관계없이 참가 기록을 추가하지 않고 최신 상세를 받습니다. 취소된 시즌은 개설자에게만 기존 자동 참가 기록을 포함한 상세를 반환합니다. 본문은 없습니다.',
   })
   @ApiParam({
     name: 'id',
@@ -80,6 +80,7 @@ export class JoinSeasonController {
       SeasonErrorCodes.SeasonParticipationWalletMismatch,
       SeasonErrorCodes.SeasonStateConflict,
       SeasonErrorCodes.SeasonCapacityReached,
+      SeasonErrorCodes.SeasonEntryPaymentRequired,
     ],
     { rateLimited: false },
   )

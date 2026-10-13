@@ -52,6 +52,9 @@ import {
 import { GetSeasonNftController } from './features/get-season-nft/get-season-nft.controller';
 import { GetSeasonNftQuery } from './features/get-season-nft/get-season-nft.query';
 import { GetSeasonNftUseCase } from './features/get-season-nft/get-season-nft.use-case';
+import { ListSeasonHoldersController } from './features/list-season-holders/list-season-holders.controller';
+import { ListSeasonHoldersQuery } from './features/list-season-holders/list-season-holders.query';
+import { ListSeasonHoldersUseCase } from './features/list-season-holders/list-season-holders.use-case';
 import { CreateClaimAttemptController } from './features/create-claim-attempt/create-claim-attempt.controller';
 import { CreateClaimAttemptUseCase } from './features/create-claim-attempt/create-claim-attempt.use-case';
 import { GetClaimAttemptController } from './features/get-claim-attempt/get-claim-attempt.controller';
@@ -70,6 +73,7 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
   imports: [AuthModule, CanvasModule],
   controllers: [
     GetSeasonNftController,
+    ListSeasonHoldersController,
     CreateClaimAttemptController,
     GetClaimAttemptController,
     SubmitClaimTransactionController,
@@ -85,6 +89,8 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
     },
     GetSeasonNftQuery,
     GetSeasonNftUseCase,
+    ListSeasonHoldersQuery,
+    ListSeasonHoldersUseCase,
     SeasonNftRepository,
     ClaimRepository,
     NftTransactionRepository,

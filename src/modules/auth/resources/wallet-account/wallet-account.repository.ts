@@ -17,8 +17,23 @@ export type WalletAccount = Readonly<{
   displayName: string | null;
   avatarUrl: string | null;
   status: string;
+  createdAt: string;
   walletId: string;
 }>;
+
+type UserRow = Omit<WalletAccount, 'walletId' | 'createdAt'> &
+  Readonly<{ createdAt: Date | string }>;
+
+function createdAtIso(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime()))
+    throw new Error('User created_at is invalid');
+  return date.toISOString();
+}
+
+function mapUser(row: UserRow): Omit<WalletAccount, 'walletId'> {
+  return { ...row, createdAt: createdAtIso(row.createdAt) };
+}
 
 @Injectable()
 export class WalletAccountRepository {
@@ -50,12 +65,12 @@ export class WalletAccountRepository {
       [identity.chainNamespace, identity.addressKey],
     );
     if (!wallet.rows[0]) return undefined;
-    const user = await executor.query<Omit<WalletAccount, 'walletId'>>(
-      'SELECT id, display_name AS "displayName", avatar_url AS "avatarUrl", status FROM users WHERE id = $1 FOR UPDATE',
+    const user = await executor.query<UserRow>(
+      'SELECT id, display_name AS "displayName", avatar_url AS "avatarUrl", status, created_at AS "createdAt" FROM users WHERE id = $1 FOR UPDATE',
       [wallet.rows[0].user_id],
     );
     if (!user.rows[0]) throw new Error('Wallet account is missing');
-    return { ...user.rows[0], walletId: wallet.rows[0].id };
+    return { ...mapUser(user.rows[0]), walletId: wallet.rows[0].id };
   }
 
   /** 세션의 사용자를 잠그고, 대기 중 완료된 계정 상태 변경을 다시 읽는다. */
@@ -63,13 +78,11 @@ export class WalletAccountRepository {
     userId: string,
     transaction: TransactionContext,
   ): Promise<Omit<WalletAccount, 'walletId'> | undefined> {
-    const result = await getPgExecutor(this.pool, transaction).query<
-      Omit<WalletAccount, 'walletId'>
-    >(
-      'SELECT id, display_name AS "displayName", avatar_url AS "avatarUrl", status FROM users WHERE id = $1 FOR UPDATE',
+    const result = await getPgExecutor(this.pool, transaction).query<UserRow>(
+      'SELECT id, display_name AS "displayName", avatar_url AS "avatarUrl", status, created_at AS "createdAt" FROM users WHERE id = $1 FOR UPDATE',
       [userId],
     );
-    return result.rows[0];
+    return result.rows[0] ? mapUser(result.rows[0]) : undefined;
   }
 
   /** 새 사용자와 최초 지갑을 같은 트랜잭션에 생성한다. 자동 생성 닉네임의 중복은 허용한다. */
@@ -79,10 +92,10 @@ export class WalletAccountRepository {
     transaction: TransactionContext,
   ): Promise<WalletAccount> {
     const executor = getPgExecutor(this.pool, transaction);
-    const user = await executor.query<Omit<WalletAccount, 'walletId'>>(
+    const user = await executor.query<UserRow>(
       `INSERT INTO users (display_name, avatar_url, status, created_at, updated_at)
        VALUES ($1, NULL, 'active', $2, $2)
-       RETURNING id, display_name AS "displayName", avatar_url AS "avatarUrl", status`,
+       RETURNING id, display_name AS "displayName", avatar_url AS "avatarUrl", status, created_at AS "createdAt"`,
       [`user-${randomBytes(4).toString('hex')}`, time],
     );
     const wallet = await executor.query<{ id: string }>(
@@ -96,7 +109,7 @@ export class WalletAccountRepository {
         time,
       ],
     );
-    return { ...user.rows[0], walletId: wallet.rows[0].id };
+    return { ...mapUser(user.rows[0]), walletId: wallet.rows[0].id };
   }
 
   /** 계정 로그인 시각과 이번에 증명한 지갑의 사용 시각만 갱신한다. */

@@ -18,6 +18,7 @@ export type SessionAuthenticationResult =
         id: string;
         displayName: string | null;
         avatarUrl: string | null;
+        createdAt: string;
       }>;
     }>;
 
@@ -71,6 +72,7 @@ export class SessionAuthenticator {
         id: account.id,
         displayName: account.displayName,
         avatarUrl: account.avatarUrl,
+        createdAt: account.createdAt,
       },
     };
   }

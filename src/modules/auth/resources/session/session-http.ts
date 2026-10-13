@@ -33,6 +33,14 @@ class AuthenticatedUserResponse {
   @ApiProperty({ type: String, nullable: true, example: null })
   avatarUrl!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    example: '2026-09-10T12:00:00.000Z',
+    description: '계정 생성 시각.',
+  })
+  createdAt!: string;
+
   @ApiProperty({ type: [WalletResponse] })
   wallets!: ReadonlyArray<WalletResponse>;
 }

@@ -66,4 +66,5 @@ export const SeasonNftInternalErrorCodes = {
   FinalSnapshotInvalid: 'NFT_FINAL_SNAPSHOT_INVALID',
   MediaSourceInvalid: 'NFT_MEDIA_SOURCE_INVALID',
   SourceIneligible: 'NFT_SOURCE_INELIGIBLE',
+  TooManyContributors: 'NFT_TOO_MANY_CONTRIBUTORS',
 } as const;

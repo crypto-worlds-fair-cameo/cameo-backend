@@ -5,12 +5,17 @@ import type {
   SeasonNftReleaseStage,
   SeasonNftReleaseState,
 } from './season-nft';
+import { SeasonNftInternalErrorCodes } from './season-nft.error-codes';
 
 export type SeasonNftAvailability =
   'WAITING_FOR_END' | 'PREPARING' | 'READY' | 'EMPTY' | 'UNAVAILABLE';
 
 export type SeasonNftUnavailableReason =
-  'CANCELLED' | 'FORCE_ENDED' | 'FEATURE_DISABLED' | null;
+  | 'CANCELLED'
+  | 'FORCE_ENDED'
+  | 'FEATURE_DISABLED'
+  | 'TOO_MANY_CONTRIBUTORS'
+  | null;
 
 export type SeasonNftClaimEligibility =
   'ELIGIBLE' | 'NOT_PARTICIPANT' | 'NO_VALID_STROKE';
@@ -55,6 +60,7 @@ export type SeasonNftViewSource = Readonly<{
     assetName: string | null;
     imageUri: string | null;
     metadataUri: string | null;
+    lastErrorCode: string | null;
   }> | null;
   claim: Readonly<{
     state: SeasonNftClaimState;
@@ -89,6 +95,13 @@ export function toSeasonNftView(
     reason = 'FEATURE_DISABLED';
   } else if (source.observedAt.getTime() < source.endsAt.getTime()) {
     availability = 'WAITING_FOR_END';
+  } else if (
+    release?.state === 'BLOCKED' &&
+    release.lastErrorCode === SeasonNftInternalErrorCodes.TooManyContributors
+  ) {
+    // 다른 BLOCKED 원인과 달리 운영 조치로 풀리지 않는 영구 미발행이므로 원인을 공개한다.
+    availability = 'UNAVAILABLE';
+    reason = 'TOO_MANY_CONTRIBUTORS';
   } else if (release?.state === 'EMPTY') {
     availability = 'EMPTY';
   } else if (release?.state === 'READY') {

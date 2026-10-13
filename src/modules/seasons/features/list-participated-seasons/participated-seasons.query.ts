@@ -45,6 +45,7 @@ type ParticipatedSeasonRow = Readonly<{
   asset_name: string | null;
   image_uri: string | null;
   metadata_uri: string | null;
+  last_error_code: string | null;
   claim_state: SeasonNftClaimState | null;
   claim_wallet_address: string | null;
   active_attempt_id: string | null;
@@ -108,7 +109,7 @@ export class ParticipatedSeasonsQuery {
               final_snapshot.image_key AS final_image_key,
               release.state AS release_state, release.stage AS release_stage,
               release.snapshot_id, release.eligible_count, release.asset_name,
-              release.image_uri, release.metadata_uri,
+              release.image_uri, release.metadata_uri, release.last_error_code,
               claim.state AS claim_state,
               claim.wallet_address AS claim_wallet_address,
               attempt.id AS active_attempt_id, claim.asset_address,
@@ -153,6 +154,7 @@ function toRecord(row: ParticipatedSeasonRow): ParticipatedSeasonRecord {
           assetName: row.asset_name,
           imageUri: row.image_uri,
           metadataUri: row.metadata_uri,
+          lastErrorCode: row.last_error_code,
         };
   const claim: SeasonNftViewSource['claim'] =
     row.claim_state === null ||

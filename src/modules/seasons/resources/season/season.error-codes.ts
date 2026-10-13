@@ -50,4 +50,58 @@ export const SeasonErrorCodes = {
     message: 'Season is temporarily unavailable.',
     description: '시즌 서비스를 일시적으로 사용할 수 없습니다.',
   },
+  SeasonEntryFeeUnavailable: {
+    statusCode: 503,
+    code: 'SEASON_ENTRY_FEE_UNAVAILABLE',
+    message: 'Entry fee payments are unavailable right now.',
+    description:
+      '서버에 Solana network나 RPC가 설정되지 않았거나 RPC가 응답하지 않아 입장료를 처리할 수 없습니다.',
+  },
+  SeasonEntryPaymentRequired: {
+    statusCode: 402,
+    code: 'SEASON_ENTRY_PAYMENT_REQUIRED',
+    message: 'Pay the entry fee to join this season.',
+    description: '유료 시즌은 참가 API 대신 입장료 결제 API로 참가해야 합니다.',
+  },
+  SeasonEntryFeeNotRequired: {
+    statusCode: 409,
+    code: 'SEASON_ENTRY_FEE_NOT_REQUIRED',
+    message: 'This season does not require an entry fee.',
+    description:
+      '무료 시즌이거나 개설자·기존 참가자라 입장료 결제가 필요하지 않습니다.',
+  },
+  SeasonEntryPaymentNotFound: {
+    statusCode: 404,
+    code: 'SEASON_ENTRY_PAYMENT_NOT_FOUND',
+    message: 'Entry payment not found.',
+    description: '결제가 없거나 현재 사용자·시즌의 결제가 아닙니다.',
+  },
+  SeasonEntryPaymentExpired: {
+    statusCode: 409,
+    code: 'SEASON_ENTRY_PAYMENT_EXPIRED',
+    message: 'The payment request expired. Please try again.',
+    description:
+      '서명 기한이 지났거나 거래 blockhash가 만료되었습니다. 새 결제를 시작해야 합니다.',
+  },
+  SeasonEntryPaymentInvalidState: {
+    statusCode: 409,
+    code: 'SEASON_ENTRY_PAYMENT_INVALID_STATE',
+    message: 'This payment is no longer awaiting a signature.',
+    description: '결제가 이미 제출되었거나 종료된 상태입니다.',
+  },
+  SeasonEntryTransactionInvalid: {
+    statusCode: 400,
+    code: 'SEASON_ENTRY_TRANSACTION_INVALID',
+    message: 'The signed transaction does not match the prepared payment.',
+    description:
+      '거래 형식·메시지·payer 또는 서명이 서버가 준비한 입장료 거래와 다릅니다.',
+  },
+  SeasonEntryPaymentFailed: {
+    statusCode: 409,
+    code: 'SEASON_ENTRY_PAYMENT_FAILED',
+    message:
+      'The entry fee transaction failed. Check your wallet balance and try again.',
+    description:
+      'RPC가 거래를 거절했거나 체인에서 실패했습니다. 잔액을 확인한 뒤 새 결제를 시작해야 합니다.',
+  },
 } as const satisfies Record<string, BusinessErrorDefinition>;

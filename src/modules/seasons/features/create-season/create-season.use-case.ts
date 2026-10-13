@@ -54,6 +54,14 @@ export class CreateSeasonUseCase {
       }
       const { time, user } = authentication;
       const normalized = normalizeSeasonInput(input, time);
+      // 입장료를 받을 chain 설정이 없으면 참가자가 결제할 수 없는 유료 시즌을 만들지 않는다.
+      if (
+        normalized.entryFeeLamports > 0n &&
+        (!this.config.get('seasonNft.network', { infer: true }) ||
+          !this.config.get('seasonNft.rpcUrl', { infer: true }))
+      ) {
+        throw new BusinessError(ErrorCodes.SeasonEntryFeeUnavailable);
+      }
 
       // 사용자 행 잠금이 유지되는 동안 현재 열린 시즌 수를 확인해 동시 생성도 3개를 넘지 못한다.
       const openCount = await this.seasons.countOpenByCreator(
@@ -73,7 +81,14 @@ export class CreateSeasonUseCase {
       await this.seasons.insert(
         canvasId,
         user.id,
-        normalized,
+        {
+          ...normalized,
+          // 입장료는 개설 요청을 인증한 지갑으로 받으며 개설 뒤 바꾸지 않는다.
+          entryFeeRecipient:
+            normalized.entryFeeLamports > 0n
+              ? authentication.walletAddress
+              : null,
+        },
         time,
         transaction,
       );

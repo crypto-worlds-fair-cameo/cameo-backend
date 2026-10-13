@@ -31,6 +31,7 @@ export type CanvasViewerAccess = Readonly<{
     Readonly<{
       status: SeasonStatus;
       isCreator: boolean;
+      strokesUsed?: number;
     }>;
 }>;
 
@@ -91,6 +92,7 @@ export class CanvasAccess {
       // 취소한 시즌은 개설자에게만 읽기 전용으로 남기고 존재 자체를 숨긴다.
       if (season.cancelledAt !== null && !isCreator)
         throw new CanvasStrokeError('CANVAS_NOT_FOUND', 'Canvas not found.');
+      this.assertSeasonEntry(season, viewer.userId ?? undefined);
       return {
         viewer,
         canDraw: this.canDrawSeason(viewer.userId ?? undefined, {
@@ -174,11 +176,28 @@ export class CanvasAccess {
     // 취소 확정 뒤에는 개설자 외 연결이 room 합류를 완료하지 못하게 한다.
     if (season.cancelledAt !== null && season.creatorId !== userId)
       throw new CanvasStrokeError('CANVAS_NOT_FOUND', 'Canvas not found.');
+    this.assertSeasonEntry(season, userId);
     return {
       ...season,
       status: getSeasonStatus(season, season.observedAt),
       isCreator: season.creatorId === userId,
+      strokesUsed:
+        userId === undefined
+          ? undefined
+          : await this.seasons.strokesUsed(canvasId, userId),
     };
+  }
+
+  /** 지갑 보유자 전용 시즌은 로그인한 사용자만 캔버스 관람 연결을 연다. */
+  private assertSeasonEntry(
+    season: Pick<SeasonCanvasFacts, 'entryRule'>,
+    userId: string | undefined,
+  ): void {
+    if (season.entryRule === 'wallet_holders' && userId === undefined)
+      throw new CanvasStrokeError(
+        'AUTH_REQUIRED',
+        'Sign in with a wallet to enter this season.',
+      );
   }
 
   /** 시작과 완료 전송에서만 기존 세션을 다시 확인하고 인증된 사용자 ID를 반환한다. */

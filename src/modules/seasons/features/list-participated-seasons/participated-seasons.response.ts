@@ -42,7 +42,12 @@ class ParticipatedSeasonNftResponse {
 
   @ApiProperty({
     type: String,
-    enum: ['CANCELLED', 'FORCE_ENDED', 'FEATURE_DISABLED'],
+    enum: [
+      'CANCELLED',
+      'FORCE_ENDED',
+      'FEATURE_DISABLED',
+      'TOO_MANY_CONTRIBUTORS',
+    ],
     nullable: true,
   })
   reason!: ParticipatedSeasonItem['nft']['reason'];

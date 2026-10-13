@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { SeasonDetail, SeasonStatus } from './season';
+import type { SeasonDetail, SeasonEntryRule, SeasonStatus } from './season';
 
 /** 시즌 HTTP 응답의 날짜를 ISO 문자열로 고정하고 nullable 값을 명시한다. */
 export class SeasonDetailResponse {
@@ -15,7 +15,7 @@ export class SeasonDetailResponse {
   @ApiProperty({
     type: String,
     nullable: true,
-    maxLength: 100,
+    maxLength: 1000,
     example: '30일 동안 함께 완성하는 공개 캔버스',
   })
   description!: string | null;
@@ -46,10 +46,34 @@ export class SeasonDetailResponse {
   })
   strokeLimitPerUser!: number | null;
 
-  @ApiProperty({ type: 'integer', minimum: 2, maximum: 100, example: 20 })
-  capacity!: number;
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    minimum: 2,
+    maximum: 100,
+    example: 20,
+    description: '개설자를 포함한 누적 참가 정원. null이면 무제한입니다.',
+  })
+  capacity!: number | null;
 
-  @ApiProperty({ type: 'integer', minimum: 1, maximum: 100, example: 1 })
+  @ApiProperty({
+    enum: ['anyone', 'wallet_holders'],
+    example: 'anyone',
+    description:
+      'anyone이면 로그인하지 않은 손님도 캔버스를 관람하고, wallet_holders이면 지갑으로 로그인한 사용자만 캔버스에 입장합니다.',
+  })
+  entryRule!: SeasonEntryRule;
+
+  @ApiProperty({
+    type: String,
+    pattern: '^(0|[1-9][0-9]{0,11})$',
+    example: '0',
+    description:
+      'lamports 단위 입장료 10진 문자열. 0이면 무료이며, 개설자를 제외한 신규 참가자가 개설자 지갑으로 보냅니다. 환불은 없습니다.',
+  })
+  entryFeeLamports!: string;
+
+  @ApiProperty({ type: 'integer', minimum: 1, example: 1 })
   participantCount!: number;
 
   @ApiProperty({ type: String, format: 'date-time' })

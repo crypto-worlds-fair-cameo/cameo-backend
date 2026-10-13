@@ -169,6 +169,7 @@ export class CanvasSnapshotRepository {
                c.type = 'season'
                AND s.canvas_id IS NOT NULL
                AND (s.cancelled_at IS NULL OR s.creator_id = $2::uuid)
+               AND (s.entry_rule = 'anyone' OR $2::uuid IS NOT NULL)
              )
            )
        ), page AS (

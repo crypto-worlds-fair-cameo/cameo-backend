@@ -9,7 +9,7 @@ import {
   ApiPropertyOptional,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsInt, IsString, ValidateIf } from 'class-validator';
+import { IsIn, IsInt, IsString, Matches, ValidateIf } from 'class-validator';
 import type { Request } from 'express';
 import type { AllConfigType } from '../../../../config/config.type';
 import { AuthErrorCodes } from '../../../../errors/auth.error-codes';
@@ -21,7 +21,10 @@ import {
   authCookies,
   readAuthCookie,
 } from '../../../auth/resources/auth-cookie/auth-http';
-import type { CreateSeasonInput } from '../../resources/season/season';
+import type {
+  CreateSeasonInput,
+  SeasonEntryRule,
+} from '../../resources/season/season';
 import { SeasonErrorCodes } from '../../resources/season/season.error-codes';
 import {
   SeasonDetailResponse,
@@ -41,10 +44,10 @@ class CreateSeasonBody implements CreateSeasonInput {
 
   @ApiPropertyOptional({
     type: String,
-    maxLength: 100,
+    maxLength: 1000,
     example: '30일 동안 함께 완성하는 공개 캔버스',
     description:
-      '앞뒤 공백을 제거한 최대 100자 설명. 생략하거나 빈 문자열이면 null로 저장하며 null 입력은 허용하지 않습니다.',
+      '앞뒤 공백을 제거한 최대 1000자 설명. 생략하거나 빈 문자열이면 null로 저장하며 null 입력은 허용하지 않습니다.',
   })
   @ValidateIf((_object, value) => value !== undefined)
   @IsString()
@@ -85,9 +88,41 @@ class CreateSeasonBody implements CreateSeasonInput {
   @IsInt()
   strokeLimitPerUser?: number | null;
 
-  @ApiProperty({ type: 'integer', minimum: 2, maximum: 100, example: 20 })
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    minimum: 2,
+    maximum: 100,
+    example: 20,
+    description:
+      '개설자를 포함한 누적 참가 정원. null이면 무제한입니다. 유효 획 참여자가 100명을 넘은 시즌은 NFT를 발행하지 않습니다.',
+  })
+  @ValidateIf((_object, value) => value !== null)
   @IsInt()
-  capacity!: number;
+  capacity!: number | null;
+
+  @ApiPropertyOptional({
+    enum: ['anyone', 'wallet_holders'],
+    default: 'anyone',
+    description:
+      'anyone이면 손님도 캔버스를 관람하고, wallet_holders이면 지갑으로 로그인한 사용자만 캔버스에 입장합니다. 참가는 두 규칙 모두 로그인이 필요합니다.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(['anyone', 'wallet_holders'])
+  entryRule?: SeasonEntryRule;
+
+  @ApiPropertyOptional({
+    type: String,
+    pattern: '^(0|[1-9][0-9]{0,11})$',
+    default: '0',
+    example: '10000000',
+    description:
+      'lamports 단위 입장료 10진 문자열. 0이면 무료이고, 유료는 1000000(0.001 SOL) 이상 100000000000(100 SOL) 이하입니다. 입장료는 개설자의 현재 인증 지갑으로 받고 환불하지 않습니다.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @Matches(/^(?:0|[1-9][0-9]{0,11})$/)
+  entryFeeLamports?: string;
 
   @ApiPropertyOptional({
     type: String,
@@ -131,7 +166,7 @@ export class CreateSeasonController {
   @ApiOperation({
     summary: '시즌 개설',
     description:
-      '로그인 세션 쿠키와 허용된 Origin이 필요합니다. 개설과 개설자의 자동 참가는 무료이며 모든 시즌은 공개입니다. 시즌 캔버스와 개설자의 참가 기록을 함께 생성합니다. 다른 사용자는 참가 API로 진행 중인 시즌에 참가할 수 있습니다. 개설자는 대기·진행 시즌을 최대 3개 보유할 수 있습니다. 같은 요청을 다시 보내면 새 ID의 시즌을 생성합니다.',
+      '로그인 세션 쿠키와 허용된 Origin이 필요합니다. 개설과 개설자의 자동 참가는 무료이며 시즌 목록과 상세는 공개입니다. 시즌 캔버스와 개설자의 참가 기록을 함께 생성합니다. 다른 사용자는 참가 API로 진행 중인 시즌에 참가하며, 입장료가 있으면 입장료 결제 API로 참가합니다. 유료 시즌은 서버에 Solana network와 RPC가 설정되어 있어야 합니다. 개설자는 대기·진행 시즌을 최대 3개 보유할 수 있습니다. 같은 요청을 다시 보내면 새 ID의 시즌을 생성합니다.',
   })
   @ApiHeader({
     name: 'Origin',
@@ -152,6 +187,7 @@ export class CreateSeasonController {
       AuthErrorCodes.AuthUserUnavailable,
       SeasonErrorCodes.SeasonInputInvalid,
       SeasonErrorCodes.SeasonActiveLimitReached,
+      SeasonErrorCodes.SeasonEntryFeeUnavailable,
     ],
     { rateLimited: false },
   )

@@ -32,6 +32,7 @@ export type LoginResult =
         id: string;
         displayName: string | null;
         avatarUrl: string | null;
+        createdAt: string;
         wallets: ReadonlyArray<
           Readonly<{ chainNamespace: string; address: string }>
         >;
@@ -166,6 +167,7 @@ export class LoginUseCase {
           id: account.id,
           displayName: account.displayName,
           avatarUrl: account.avatarUrl,
+          createdAt: account.createdAt,
           wallets,
         },
         session,
