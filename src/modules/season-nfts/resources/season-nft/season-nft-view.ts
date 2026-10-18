@@ -18,7 +18,7 @@ export type SeasonNftUnavailableReason =
   | null;
 
 export type SeasonNftClaimEligibility =
-  'ELIGIBLE' | 'NOT_PARTICIPANT' | 'NO_VALID_STROKE';
+  'ELIGIBLE' | 'NOT_PARTICIPANT' | 'NO_VALID_STROKE' | 'CREATOR';
 
 export type SeasonNftClaimView = Readonly<{
   eligibility: SeasonNftClaimEligibility;
@@ -52,6 +52,9 @@ export type SeasonNftViewSource = Readonly<{
   observedAt: Date;
   participantWalletAddress: string | null;
   ownStrokeCount: number;
+  isCreator: boolean;
+  entryFeeLamports: string;
+  hasConfirmedPayment: boolean;
   release: Readonly<{
     state: SeasonNftReleaseState;
     stage: SeasonNftReleaseStage;
@@ -82,18 +85,18 @@ export function toSeasonNftView(
   let availability: SeasonNftAvailability;
   let reason: SeasonNftUnavailableReason = null;
 
-  // 취소와 강제 종료는 기능 설정이나 release보다 우선하여 영구 수령 불가로 표시한다.
+  // 취소만 영구 수령 불가다. 조기 종료는 개설자가 발행할 수 있는 종료다.
+  const seasonEnded =
+    source.forceEndedAt !== null ||
+    source.observedAt.getTime() >= source.endsAt.getTime();
   if (source.cancelledAt !== null) {
     availability = 'UNAVAILABLE';
     reason = 'CANCELLED';
-  } else if (source.forceEndedAt !== null) {
-    availability = 'UNAVAILABLE';
-    reason = 'FORCE_ENDED';
   } else if (!options.enabled) {
     // 비활성화는 새 수령을 막지만 아래의 기존 release와 claim 증거는 그대로 보존한다.
     availability = 'UNAVAILABLE';
     reason = 'FEATURE_DISABLED';
-  } else if (source.observedAt.getTime() < source.endsAt.getTime()) {
+  } else if (!seasonEnded) {
     availability = 'WAITING_FOR_END';
   } else if (
     release?.state === 'BLOCKED' &&
@@ -111,12 +114,19 @@ export function toSeasonNftView(
     availability = 'PREPARING';
   }
 
+  const paidSeason = source.entryFeeLamports !== '0';
+  const canClaim =
+    source.participantWalletAddress !== null &&
+    !source.isCreator &&
+    (paidSeason ? source.hasConfirmedPayment : source.ownStrokeCount >= 1);
   const eligibility: SeasonNftClaimEligibility =
     source.participantWalletAddress === null
       ? 'NOT_PARTICIPANT'
-      : source.ownStrokeCount < 1
-        ? 'NO_VALID_STROKE'
-        : 'ELIGIBLE';
+      : source.isCreator
+        ? 'CREATOR'
+        : canClaim
+          ? 'ELIGIBLE'
+          : 'NO_VALID_STROKE';
   const claim = source.claim;
   const isParticipant = source.participantWalletAddress !== null;
 

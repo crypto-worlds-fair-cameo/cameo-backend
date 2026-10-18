@@ -834,7 +834,7 @@ test('runtime bounds aggregate user admission across repeated backlog scans', as
   finish();
 });
 
-test('release and candidate scans reserve one shared storage admission bound', async () => {
+test('candidate scans no longer prepare releases before the creator asks', async () => {
   let resolveReleases;
   const releaseLimits = [];
   const candidateLimits = [];
@@ -874,7 +874,7 @@ test('release and candidate scans reserve one shared storage admission bound', a
   await flushMicrotasks();
   await runtime.scanCandidates(scheduler);
   assert.deepEqual(releaseLimits, [20]);
-  assert.deepEqual(candidateLimits, [0]);
+  assert.deepEqual(candidateLimits, []);
   resolveReleases([]);
   await releaseScan;
 });

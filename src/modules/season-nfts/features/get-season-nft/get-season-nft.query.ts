@@ -21,6 +21,9 @@ type SeasonNftViewRow = Readonly<{
   observed_at: Date;
   participant_wallet_address: string | null;
   own_stroke_count: number;
+  is_creator: boolean;
+  entry_fee_lamports: string;
+  has_confirmed_payment: boolean;
   release_state: SeasonNftReleaseState | null;
   release_stage: SeasonNftReleaseStage | null;
   snapshot_id: string | null;
@@ -64,6 +67,14 @@ export class GetSeasonNftQuery {
               CURRENT_TIMESTAMP AS observed_at,
               participant.wallet_address AS participant_wallet_address,
               COALESCE(usage.stroke_count, 0)::integer AS own_stroke_count,
+              s.creator_id = $2 AS is_creator,
+              s.entry_fee_lamports::text AS entry_fee_lamports,
+              EXISTS (
+                SELECT 1 FROM season_entry_payments payment
+                WHERE payment.season_id = s.canvas_id
+                  AND payment.user_id = $2
+                  AND payment.status = 'CONFIRMED'
+              ) AS has_confirmed_payment,
               release.state AS release_state, release.stage AS release_stage,
               release.snapshot_id, release.eligible_count, release.asset_name,
               release.image_uri, release.metadata_uri, release.last_error_code,
@@ -107,6 +118,9 @@ function toSource(row: SeasonNftViewRow): SeasonNftViewSource {
     observedAt: row.observed_at,
     participantWalletAddress: row.participant_wallet_address,
     ownStrokeCount: row.own_stroke_count,
+    isCreator: row.is_creator,
+    entryFeeLamports: row.entry_fee_lamports,
+    hasConfirmedPayment: row.has_confirmed_payment,
     release:
       row.release_state === null || row.release_stage === null
         ? null

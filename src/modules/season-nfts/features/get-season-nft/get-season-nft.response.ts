@@ -5,7 +5,9 @@ import type {
 } from '../../resources/season-nft/season-nft-view';
 
 export class SeasonNftClaimResponse implements SeasonNftClaimView {
-  @ApiProperty({ enum: ['ELIGIBLE', 'NOT_PARTICIPANT', 'NO_VALID_STROKE'] })
+  @ApiProperty({
+    enum: ['ELIGIBLE', 'NOT_PARTICIPANT', 'NO_VALID_STROKE', 'CREATOR'],
+  })
   eligibility!: SeasonNftClaimView['eligibility'];
 
   @ApiProperty({ enum: ['UNCLAIMED', 'PROCESSING', 'CLAIMED'] })
@@ -53,7 +55,7 @@ export class SeasonNftResponse implements SeasonNftView {
     ],
     nullable: true,
     description:
-      'TOO_MANY_CONTRIBUTORS는 유효 획 참여자가 100명을 넘어 NFT를 발행하지 않는 정원 무제한 시즌입니다.',
+      'TOO_MANY_CONTRIBUTORS는 예전 100명 제한으로 이미 막힌 발행만 표시한다. 새 발행의 최소 수량은 참여자 수다.',
   })
   reason!: SeasonNftView['reason'];
 
@@ -66,7 +68,7 @@ export class SeasonNftResponse implements SeasonNftView {
   @ApiProperty({ type: String, format: 'uri', nullable: true })
   metadataUri!: string | null;
 
-  @ApiProperty({ type: 'integer', minimum: 0, maximum: 100, nullable: true })
+  @ApiProperty({ type: 'integer', minimum: 0, nullable: true })
   eligibleCount!: number | null;
 
   @ApiProperty({ type: () => SeasonNftClaimResponse })

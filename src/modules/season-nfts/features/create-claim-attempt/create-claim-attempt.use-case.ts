@@ -65,7 +65,7 @@ export class CreateClaimAttemptUseCase {
         );
         if (!scope.seasonExists)
           throw new BusinessError(ErrorCodes.SeasonNotFound);
-        if (scope.cancelled || scope.forceEnded) {
+        if (scope.cancelled) {
           throw new BusinessError(ErrorCodes.NftSeasonUnavailable);
         }
         if (!scope.participant) {

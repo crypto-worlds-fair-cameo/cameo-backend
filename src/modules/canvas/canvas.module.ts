@@ -50,6 +50,11 @@ import { FinalCanvasSnapshotReader } from './resources/canvas-snapshot/final-can
     BootstrapCanvasUseCase,
     ListCanvasHistoryUseCase,
   ],
-  exports: [CanvasDefinition, CanvasDrawing, FinalCanvasSnapshotReader],
+  exports: [
+    CanvasDefinition,
+    CanvasDrawing,
+    CanvasSnapshotFiles,
+    FinalCanvasSnapshotReader,
+  ],
 })
 export class CanvasModule {}

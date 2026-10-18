@@ -24,7 +24,31 @@ export const SeasonNftErrorCodes = {
     statusCode: 409,
     code: 'NFT_SEASON_UNAVAILABLE',
     message: 'This season is not eligible for NFT claims.',
-    description: '취소 또는 조기 종료 시즌은 NFT 수령 대상이 아닙니다.',
+    description: '취소된 시즌은 NFT 수령 대상이 아닙니다.',
+  },
+  NftMintNotCreator: {
+    statusCode: 403,
+    code: 'NFT_MINT_NOT_CREATOR',
+    message: 'Only the season creator can mint this NFT.',
+    description: '시즌 개설자만 NFT를 발행할 수 있습니다.',
+  },
+  NftMintNotEnded: {
+    statusCode: 409,
+    code: 'NFT_MINT_NOT_ENDED',
+    message: 'The season has not ended yet.',
+    description: '끝나지 않은 시즌은 NFT를 발행할 수 없습니다.',
+  },
+  NftMintSupplyTooSmall: {
+    statusCode: 400,
+    code: 'NFT_MINT_SUPPLY_TOO_SMALL',
+    message: 'The supply must be at least the number of eligible participants.',
+    description: '발행 수량은 받을 수 있는 사람 수 이상이어야 합니다.',
+  },
+  NftMintAllocationTooLarge: {
+    statusCode: 400,
+    code: 'NFT_MINT_ALLOCATION_TOO_LARGE',
+    message: 'The creator allocation exceeds the on-chain mint limit.',
+    description: '개설자 지갑으로 바로 넣는 수량은 65535개를 넘을 수 없습니다.',
   },
   NftNotReady: {
     statusCode: 409,
@@ -67,4 +91,5 @@ export const SeasonNftInternalErrorCodes = {
   MediaSourceInvalid: 'NFT_MEDIA_SOURCE_INVALID',
   SourceIneligible: 'NFT_SOURCE_INELIGIBLE',
   TooManyContributors: 'NFT_TOO_MANY_CONTRIBUTORS',
+  SupplyBelowEligible: 'NFT_SUPPLY_BELOW_ELIGIBLE',
 } as const;

@@ -334,7 +334,7 @@ test('GET season NFT authenticates and exposes exact user-scoped view precedence
 
   const cases = [
     [cancelled, 'UNAVAILABLE', 'CANCELLED'],
-    [forced, 'UNAVAILABLE', 'FORCE_ENDED'],
+    [forced, 'PREPARING', null],
     [waiting, 'WAITING_FOR_END', null],
     [blocked, 'PREPARING', null],
     [empty, 'EMPTY', null],
@@ -367,7 +367,7 @@ test('GET season NFT authenticates and exposes exact user-scoped view precedence
     .data;
   assert.equal(waitingView.eligibleCount, null);
   assert.deepEqual(waitingView.claim, {
-    eligibility: 'NO_VALID_STROKE',
+    eligibility: 'CREATOR',
     state: 'UNCLAIMED',
     walletAddress: viewer.walletAddress,
     activeAttemptId: null,

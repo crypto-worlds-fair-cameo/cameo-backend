@@ -13,6 +13,11 @@ import type {
   SeasonNftReleaseStage,
 } from './season-nft';
 import { SeasonNftInternalErrorCodes } from './season-nft.error-codes';
+import {
+  CLAIM_GUARD_GROUP,
+  CREATOR_MINT_ELIGIBILITY_SQL,
+  LEGACY_ELIGIBILITY_SQL,
+} from './season-nft-eligibility';
 
 type ReleaseRow = {
   id: string;
@@ -23,6 +28,11 @@ type ReleaseRow = {
   snapshot_id: string | null;
   through_sequence: string | null;
   eligible_count: number | null;
+  supply: string | null;
+  creator_wallet_address: string | null;
+  creator_minted_count: string;
+  nft_description: string | null;
+  claim_group: string | null;
   frozen_title: string | null;
   frozen_description: string | null;
   season_ended_at: Date | null;
@@ -42,6 +52,7 @@ type ReleaseRow = {
   ready_at: Date | null;
   next_attempt_at: Date;
   retry_count: number;
+  last_error_code: string | null;
   created_at: Date;
 };
 
@@ -124,7 +135,11 @@ export type SeasonNftChainSource = Readonly<{
   name: string;
   metadataUri: string;
   eligibleCount: number;
-  merkleRoot: Buffer;
+  supply: bigint | null;
+  creatorWalletAddress: string | null;
+  creatorMintedCount: bigint;
+  claimGroup: string | null;
+  merkleRoot: Buffer | null;
   collectionAddress: string | null;
   candyMachineAddress: string | null;
   candyGuardAddress: string | null;
@@ -145,10 +160,13 @@ export type DueSeasonNftRelease = Readonly<{
 
 const RELEASE_COLUMNS = `
   id, season_id, network, state, stage, snapshot_id, through_sequence,
-  eligible_count, frozen_title, frozen_description, season_ended_at, version,
+  eligible_count, supply::text AS supply, creator_wallet_address,
+  creator_minted_count::text AS creator_minted_count, nft_description, claim_group,
+  frozen_title, frozen_description, season_ended_at, version,
   asset_name, image_byte_length, image_sha256, metadata_sha256, image_uri, metadata_uri,
   collection_address, candy_machine_address, candy_guard_address,
-  merkle_root, preparation_keys, locked_at, ready_at, next_attempt_at, retry_count, created_at`;
+  merkle_root, preparation_keys, locked_at, ready_at, next_attempt_at, retry_count,
+  last_error_code, created_at`;
 
 const NEXT_STAGE: Readonly<
   Partial<Record<SeasonNftReleaseStage, SeasonNftReleaseStage>>
@@ -180,7 +198,6 @@ function validProof(proof: readonly (readonly number[])[]): boolean {
 }
 
 function validEligibility(rows: readonly FrozenEligibilityRow[]): boolean {
-  if (rows.length > 100) return false;
   const addresses = new Set<string>();
   return rows.every((row) => {
     if (
@@ -384,7 +401,8 @@ export class SeasonNftRepository {
       row.asset_name === null ||
       row.metadata_uri === null ||
       row.eligible_count === null ||
-      row.merkle_root === null
+      (row.merkle_root === null &&
+        !(row.supply !== null && row.eligible_count === 1))
     ) {
       throw new Error('Season NFT chain source is not frozen and verified.');
     }
@@ -397,6 +415,10 @@ export class SeasonNftRepository {
       name: row.asset_name,
       metadataUri: row.metadata_uri,
       eligibleCount: row.eligible_count,
+      supply: row.supply === null ? null : BigInt(row.supply),
+      creatorWalletAddress: row.creator_wallet_address,
+      creatorMintedCount: BigInt(row.creator_minted_count),
+      claimGroup: row.claim_group,
       merkleRoot: row.merkle_root,
       collectionAddress: row.collection_address,
       candyMachineAddress: row.candy_machine_address,
@@ -494,40 +516,57 @@ export class SeasonNftRepository {
   > {
     const executor = getPgExecutor(this.pool, transaction);
     // release보다 season을 먼저 잠가 후보 생성과 후속 작업의 전역 잠금 순서를 유지한다.
-    const season = await executor.query(
-      `SELECT s.canvas_id
+    const season = await executor.query<{ force_ended_at: Date | null }>(
+      `SELECT s.force_ended_at
        FROM seasons s
        JOIN canvases c ON c.id = s.canvas_id
        WHERE s.canvas_id = $1
          AND c.type = 'season'
          AND s.cancelled_at IS NULL
-         AND s.force_ended_at IS NULL
-         AND c.ends_at <= CURRENT_TIMESTAMP
+         AND (s.force_ended_at IS NOT NULL OR c.ends_at <= CURRENT_TIMESTAMP)
        FOR UPDATE OF s`,
       [input.seasonId],
     );
     if (season.rows.length === 0)
       throw new Error('Season NFT season is not eligible for a release.');
 
-    const id = randomUUID();
-    const inserted = await executor.query(
-      `INSERT INTO season_nft_releases
-         (id, season_id, network, state, stage)
-       VALUES ($1, $2, $3, 'WAITING_SNAPSHOT', 'SNAPSHOT')
-       ON CONFLICT (season_id, network) DO NOTHING
-       RETURNING id`,
-      [id, input.seasonId, input.network],
-    );
-    const result = await executor.query<ReleaseRow>(
+    const existing = await executor.query<ReleaseRow>(
       `SELECT ${RELEASE_COLUMNS}
        FROM season_nft_releases
        WHERE season_id = $1 AND network = $2
        FOR UPDATE`,
       [input.seasonId, input.network],
     );
+    // 조기 종료 시즌은 개설자가 만든 발행 기록만 이어서 처리한다.
+    if (existing.rows.length === 0 && season.rows[0].force_ended_at !== null) {
+      throw new Error('Season NFT season is not eligible for a release.');
+    }
+    let created = false;
+    if (existing.rows.length === 0) {
+      const id = randomUUID();
+      const inserted = await executor.query(
+        `INSERT INTO season_nft_releases
+           (id, season_id, network, state, stage)
+         VALUES ($1, $2, $3, 'WAITING_SNAPSHOT', 'SNAPSHOT')
+         ON CONFLICT (season_id, network) DO NOTHING
+         RETURNING id`,
+        [id, input.seasonId, input.network],
+      );
+      created = inserted.rows.length === 1;
+    }
+    const result =
+      existing.rows.length === 1
+        ? existing
+        : await executor.query<ReleaseRow>(
+            `SELECT ${RELEASE_COLUMNS}
+             FROM season_nft_releases
+             WHERE season_id = $1 AND network = $2
+             FOR UPDATE`,
+            [input.seasonId, input.network],
+          );
     const release = toRecord(result.rows[0]);
     return {
-      created: inserted.rows.length === 1,
+      created,
       releaseId: release.id,
       state: release.state,
       stage: release.stage,
@@ -584,10 +623,11 @@ export class SeasonNftRepository {
       canvas_id: string;
       title: string;
       description: string | null;
+      creator_id: string;
       cancelled_at: Date | null;
       force_ended_at: Date | null;
     }>(
-      `SELECT s.canvas_id, s.title, s.description,
+      `SELECT s.canvas_id, s.title, s.description, s.creator_id,
               s.cancelled_at, s.force_ended_at
        FROM seasons s
        WHERE s.canvas_id = $1
@@ -610,12 +650,16 @@ export class SeasonNftRepository {
       return { updated: false };
     }
     const source = season.rows[0];
-    if (source.cancelled_at !== null || source.force_ended_at !== null) {
+    const creatorMint = release.supply !== null;
+    // 수량을 고르기 전에 만든 기록만 조기 종료를 막는다. 개설자 발행은 조기 종료도 발행한다.
+    if (
+      source.cancelled_at !== null ||
+      (source.force_ended_at !== null && !creatorMint)
+    ) {
       return this.blockSourceIneligible(input, transaction);
     }
     // CAS 소유권을 확인한 뒤에만 이 worker가 계산한 proof와 root를 검증한다.
     if (
-      input.claims.length > 100 ||
       input.claims.some((claim) => !validProof(claim.merkleProof)) ||
       input.imageByteLength <= 0n ||
       !/^[0-9a-f]{64}$/.test(input.imageSha256)
@@ -628,9 +672,10 @@ export class SeasonNftRepository {
     ) {
       throw new Error('Season NFT frozen Merkle root is invalid.');
     }
+    const expectedDescription = release.nft_description ?? source.description;
     if (
       source.title !== input.frozenTitle ||
-      source.description !== input.frozenDescription
+      expectedDescription !== input.frozenDescription
     ) {
       return { updated: false, reason: 'SOURCE_CHANGED' };
     }
@@ -665,8 +710,9 @@ export class SeasonNftRepository {
     }
     if (
       snapshot.rows[0].canvas_type !== 'season' ||
-      snapshot.rows[0].ends_at.getTime() >
-        snapshot.rows[0].observed_at.getTime()
+      (snapshot.rows[0].ends_at.getTime() >
+        snapshot.rows[0].observed_at.getTime() &&
+        !(creatorMint && source.force_ended_at !== null))
     ) {
       return this.blockSourceIneligible(input, transaction);
     }
@@ -689,6 +735,15 @@ export class SeasonNftRepository {
        WHERE p.season_id = $1 ORDER BY w.id ASC FOR SHARE OF w`,
       [release.season_id],
     );
+    if (creatorMint) {
+      await executor.query(
+        `SELECT season_id, user_id FROM season_entry_payments
+         WHERE season_id = $1
+         ORDER BY user_id ASC, id ASC
+         FOR UPDATE`,
+        [release.season_id],
+      );
+    }
     const eligibility = await executor.query<{
       user_id: string;
       participant_user_id: string | null;
@@ -698,19 +753,9 @@ export class SeasonNftRepository {
       wallet_user_id: string | null;
       verified_address: string | null;
       chain_namespace: string | null;
-    }>(
-      `SELECT DISTINCT u.user_id, p.user_id AS participant_user_id,
-              p.wallet_account_id, p.wallet_address COLLATE "C" AS wallet_address,
-              w.id AS verified_wallet_id, w.user_id AS wallet_user_id,
-              w.address AS verified_address, w.chain_namespace
-       FROM canvas_stroke_usages u
-       LEFT JOIN season_participants p
-         ON p.season_id = u.canvas_id AND p.user_id = u.user_id
-       LEFT JOIN user_wallets w ON w.id = p.wallet_account_id
-       WHERE u.canvas_id = $1
-       ORDER BY p.wallet_address COLLATE "C" ASC NULLS FIRST, u.user_id ASC`,
-      [release.season_id],
-    );
+    }>(creatorMint ? CREATOR_MINT_ELIGIBILITY_SQL : LEGACY_ELIGIBILITY_SQL, [
+      release.season_id,
+    ]);
     const lockedEligibility: FrozenEligibilityRow[] = eligibility.rows.map(
       (row) => ({
         userId: row.user_id,
@@ -746,8 +791,36 @@ export class SeasonNftRepository {
         ...(blocked.rows.length === 1 ? { reason: 'BLOCKED' as const } : {}),
       };
     }
+    const claimMembers = creatorMint
+      ? lockedEligibility.filter((row) => row.userId !== source.creator_id)
+      : lockedEligibility;
+    if (creatorMint) {
+      const creator = lockedEligibility.find(
+        (row) => row.userId === source.creator_id,
+      );
+      if (
+        release.supply === null ||
+        BigInt(release.supply) < BigInt(lockedEligibility.length) ||
+        creator?.walletAddress !== release.creator_wallet_address
+      ) {
+        const blocked = await this.block(
+          {
+            releaseId: input.releaseId,
+            expectedVersion: input.expectedVersion,
+            errorCode: SeasonNftInternalErrorCodes.SupplyBelowEligible,
+            errorMessage: 'Season NFT supply does not cover eligible wallets.',
+            nextAttemptAt: new Date(),
+          },
+          transaction,
+        );
+        return {
+          updated: blocked.updated,
+          ...(blocked.updated ? { reason: 'BLOCKED' as const } : {}),
+        };
+      }
+    }
     const claimsMatch = input.claims.every((claim, index) => {
-      const member = lockedEligibility[index];
+      const member = claimMembers[index];
       return (
         member !== undefined &&
         claim.userId === member.userId &&
@@ -755,16 +828,19 @@ export class SeasonNftRepository {
         claim.walletAddress === member.walletAddress
       );
     });
-    if (input.claims.length !== lockedEligibility.length || !claimsMatch)
+    if (input.claims.length !== claimMembers.length || !claimsMatch)
       throw new Error('Season NFT frozen claims do not match eligibility.');
 
-    const state = input.claims.length === 0 ? 'EMPTY' : 'PREPARING';
+    const state =
+      !creatorMint && input.claims.length === 0 ? 'EMPTY' : 'PREPARING';
+    const claimGroup =
+      creatorMint && claimMembers.length > 0 ? CLAIM_GUARD_GROUP : null;
     const updated = await executor.query(
       `UPDATE season_nft_releases
        SET state = $3, stage = 'FROZEN', snapshot_id = $4,
            through_sequence = $5, eligible_count = $6, frozen_title = $7,
            frozen_description = $8, season_ended_at = $9, merkle_root = $10,
-           image_byte_length = $11, image_sha256 = $12,
+           image_byte_length = $11, image_sha256 = $12, claim_group = $13,
            version = version + 1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND version = $2
          AND state = 'WAITING_SNAPSHOT' AND stage = 'SNAPSHOT'
@@ -775,13 +851,14 @@ export class SeasonNftRepository {
         state,
         input.snapshotId,
         input.throughSequence.toString(),
-        input.claims.length,
+        lockedEligibility.length,
         input.frozenTitle,
         input.frozenDescription,
         input.seasonEndedAt,
         input.merkleRoot,
         input.imageByteLength.toString(),
         input.imageSha256,
+        claimGroup,
       ],
     );
     if (updated.rows.length === 0) return { updated: false };
@@ -1006,6 +1083,128 @@ export class SeasonNftRepository {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND state = 'BLOCKED' RETURNING id`,
       [input.releaseId],
+    );
+    return { updated: result.rows.length === 1 };
+  }
+
+  /** 개설자 발행 요청을 season당 한 번 만들고, 이미 있으면 그 행을 반환한다. */
+  async insertMintRequest(
+    input: Readonly<{
+      seasonId: string;
+      network: SeasonNftNetwork;
+      supply: bigint;
+      creatorWalletAddress: string;
+      nftDescription: string | null;
+    }>,
+    transaction: TransactionContext,
+  ): Promise<ReleaseRow> {
+    const executor = getPgExecutor(this.pool, transaction);
+    const season = await executor.query(
+      `SELECT s.canvas_id
+       FROM seasons s
+       JOIN canvases c ON c.id = s.canvas_id
+       WHERE s.canvas_id = $1 AND c.type = 'season'
+       FOR UPDATE OF s`,
+      [input.seasonId],
+    );
+    if (season.rows.length === 0)
+      throw new Error('Season NFT season was not found.');
+    const id = randomUUID();
+    await executor.query(
+      `INSERT INTO season_nft_releases
+         (id, season_id, network, state, stage, supply,
+          creator_wallet_address, nft_description)
+       VALUES ($1, $2, $3, 'WAITING_SNAPSHOT', 'SNAPSHOT', $4, $5, $6)
+       ON CONFLICT (season_id, network) DO NOTHING`,
+      [
+        id,
+        input.seasonId,
+        input.network,
+        input.supply.toString(),
+        input.creatorWalletAddress,
+        input.nftDescription,
+      ],
+    );
+    const result = await executor.query<ReleaseRow>(
+      `SELECT ${RELEASE_COLUMNS}
+       FROM season_nft_releases
+       WHERE season_id = $1 AND network = $2`,
+      [input.seasonId, input.network],
+    );
+    return result.rows[0];
+  }
+
+  /** 동결 전에만 수량과 설명을 바꾸고, 수량 부족으로 멈춘 기록은 다시 준비한다. */
+  async reviseMintRequest(
+    input: Readonly<{
+      releaseId: string;
+      expectedVersion: bigint;
+      supply: bigint;
+      nftDescription: string | null;
+      resumeBlocked: boolean;
+    }>,
+    transaction: TransactionContext,
+  ): Promise<Readonly<{ updated: boolean }>> {
+    const executor = getPgExecutor(this.pool, transaction);
+    const release = await this.lockRelease(input.releaseId, transaction);
+    const editable =
+      BigInt(release.version) === input.expectedVersion &&
+      release.eligible_count === null &&
+      (release.state === 'WAITING_SNAPSHOT' ||
+        (input.resumeBlocked &&
+          release.state === 'BLOCKED' &&
+          release.last_error_code ===
+            SeasonNftInternalErrorCodes.SupplyBelowEligible));
+    if (!editable) return { updated: false };
+    const result = await executor.query(
+      `UPDATE season_nft_releases
+       SET supply = $3, nft_description = $4,
+           state = 'WAITING_SNAPSHOT', stage = 'SNAPSHOT',
+           last_error_code = NULL, last_error_message = NULL,
+           next_attempt_at = CURRENT_TIMESTAMP,
+           version = version + 1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND version = $2
+       RETURNING id`,
+      [
+        input.releaseId,
+        input.expectedVersion.toString(),
+        input.supply.toString(),
+        input.nftDescription,
+      ],
+    );
+    return { updated: result.rows.length === 1 };
+  }
+
+  /** 개설자 지갑 민트가 확정되면 다음 수량으로 넘어간다. */
+  async incrementCreatorMinted(
+    input: Readonly<{
+      releaseId: string;
+      expectedVersion: bigint;
+      expectedCount: bigint;
+    }>,
+    transaction: TransactionContext,
+  ): Promise<Readonly<{ updated: boolean }>> {
+    const executor = getPgExecutor(this.pool, transaction);
+    const release = await this.lockRelease(input.releaseId, transaction);
+    if (
+      BigInt(release.version) !== input.expectedVersion ||
+      release.state !== 'PREPARING' ||
+      BigInt(release.creator_minted_count) !== input.expectedCount
+    ) {
+      return { updated: false };
+    }
+    const result = await executor.query(
+      `UPDATE season_nft_releases
+       SET creator_minted_count = creator_minted_count + 1,
+           version = version + 1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND version = $2 AND creator_minted_count = $3
+         AND state = 'PREPARING'
+       RETURNING id`,
+      [
+        input.releaseId,
+        input.expectedVersion.toString(),
+        input.expectedCount.toString(),
+      ],
     );
     return { updated: result.rows.length === 1 };
   }

@@ -60,6 +60,9 @@ import { CreateClaimAttemptUseCase } from './features/create-claim-attempt/creat
 import { GetClaimAttemptController } from './features/get-claim-attempt/get-claim-attempt.controller';
 import { GetClaimAttemptUseCase } from './features/get-claim-attempt/get-claim-attempt.use-case';
 import { SubmitClaimTransactionController } from './features/submit-claim-transaction/submit-claim-transaction.controller';
+import { RequestSeasonNftMintController } from './features/request-season-nft-mint/request-season-nft-mint.controller';
+import { RequestSeasonNftMintUseCase } from './features/request-season-nft-mint/request-season-nft-mint.use-case';
+import { SeasonNftMintQuery } from './features/request-season-nft-mint/season-nft-mint.query';
 import { SubmitClaimTransactionUseCase } from './features/submit-claim-transaction/submit-claim-transaction.use-case';
 import {
   SeasonClaimChain,
@@ -77,11 +80,14 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
     CreateClaimAttemptController,
     GetClaimAttemptController,
     SubmitClaimTransactionController,
+    RequestSeasonNftMintController,
   ],
   providers: [
     CreateClaimAttemptUseCase,
     GetClaimAttemptUseCase,
     SubmitClaimTransactionUseCase,
+    RequestSeasonNftMintUseCase,
+    SeasonNftMintQuery,
     ReconcileNftTransactionsUseCase,
     {
       provide: NftClaimReconciliation,

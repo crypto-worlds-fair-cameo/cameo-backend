@@ -6,7 +6,9 @@ import type {
 } from './list-participated-seasons.use-case';
 
 class ParticipatedSeasonClaimResponse {
-  @ApiProperty({ enum: ['ELIGIBLE', 'NOT_PARTICIPANT', 'NO_VALID_STROKE'] })
+  @ApiProperty({
+    enum: ['ELIGIBLE', 'NOT_PARTICIPANT', 'NO_VALID_STROKE', 'CREATOR'],
+  })
   eligibility!: ParticipatedSeasonItem['nft']['claim']['eligibility'];
 
   @ApiProperty({ enum: ['UNCLAIMED', 'PROCESSING', 'CLAIMED'] })

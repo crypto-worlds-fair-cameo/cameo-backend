@@ -97,8 +97,13 @@ export class ListSeasonHoldersUseCase {
           items: source.records.map((record) => ({
             displayName: record.displayName,
             walletAddress: record.walletAddress,
-            // 시즌 NFT는 참가자당 하나만 발급한다.
-            amount: record.claimed ? 1 : null,
+            amount: record.isCreator
+              ? record.creatorMintedCount > 0n
+                ? Number(record.creatorMintedCount)
+                : null
+              : record.claimed
+                ? 1
+                : null,
           })),
           page: input.page,
           limit: input.limit,

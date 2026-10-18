@@ -5,8 +5,10 @@ import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import bs58 from 'bs58';
 import {
+  createNoopSigner,
   createSignerFromKeypair,
   dateTime,
+  generateSigner,
   isNone,
   isSome,
   lamports,
@@ -116,6 +118,12 @@ export async function buildMachineAndGuard(
     eligibleCount: number;
     merkleRoot: Uint8Array;
     rentLamports: bigint;
+    creator?: Readonly<{
+      wallet: PublicKey;
+      supply: number;
+      allocation: number;
+      merkleRoot: Uint8Array | null;
+    }>;
   }>,
 ): Promise<TransactionBuilder> {
   // createCandyMachine normally fetches rent internally; inject the separately scheduled quote.
@@ -124,13 +132,39 @@ export async function buildMachineAndGuard(
       getRent: async () => lamports(input.rentLamports),
     }),
   }) as Umi;
+  const creator = input.creator;
+  const payer = creator ? createNoopSigner(creator.wallet) : input.service;
+  const groups = creator
+    ? [
+        ...(creator.merkleRoot
+          ? [
+              {
+                label: 'claim',
+                guards: {
+                  allowList: some({ merkleRoot: creator.merkleRoot }),
+                  mintLimit: some({ id: 0, limit: 1 }),
+                  startDate: some({ date: dateTime(CLAIM_BLOCK_START_DATE) }),
+                },
+              },
+            ]
+          : []),
+        {
+          label: 'owner',
+          guards: {
+            addressGate: some({ address: creator.wallet }),
+            mintLimit: some({ id: 1, limit: creator.allocation }),
+            startDate: some({ date: dateTime(0n) }),
+          },
+        },
+      ]
+    : [];
   return candy.create(context, {
     candyMachine: input.machine,
     collection: input.collection,
     collectionUpdateAuthority: input.service,
-    payer: input.service,
+    payer,
     authority: input.service.publicKey,
-    itemsAvailable: input.eligibleCount,
+    itemsAvailable: creator?.supply ?? input.eligibleCount,
     maxEditionSupply: 0,
     isMutable: false,
     hiddenSettings: some({
@@ -139,12 +173,14 @@ export async function buildMachineAndGuard(
       hash: new Uint8Array(32),
     }),
     configLineSettings: none(),
-    guards: {
-      allowList: some({ merkleRoot: input.merkleRoot }),
-      mintLimit: some({ id: 0, limit: 1 }),
-      startDate: some({ date: dateTime(CLAIM_BLOCK_START_DATE) }),
-    },
-    groups: [],
+    guards: creator
+      ? { startDate: some({ date: dateTime(CLAIM_BLOCK_START_DATE) }) }
+      : {
+          allowList: some({ merkleRoot: input.merkleRoot }),
+          mintLimit: some({ id: 0, limit: 1 }),
+          startDate: some({ date: dateTime(CLAIM_BLOCK_START_DATE) }),
+        },
+    groups,
   });
 }
 
@@ -204,6 +240,96 @@ export function buildFinalGuardLock(
         newAuthority: input.lockAuthority,
       }),
     );
+}
+
+/** 개설자 몫을 개설자 지갑으로 하나 만든다. 수수료와 계정 임대료는 개설자가 낸다. */
+export function buildCreatorMint(
+  input: Readonly<{
+    umi: Umi;
+    creator: PublicKey;
+    asset: Signer;
+    collection: PublicKey;
+    candyMachine: PublicKey;
+    candyGuard: PublicKey;
+  }>,
+): TransactionBuilder {
+  const payer = createNoopSigner(input.creator);
+  return candy.mintV1(input.umi, {
+    candyMachine: input.candyMachine,
+    candyGuard: input.candyGuard,
+    payer,
+    minter: payer,
+    owner: payer.publicKey,
+    asset: input.asset,
+    collection: input.collection,
+    group: 'owner',
+    mintArgs: {
+      addressGate: { address: input.creator },
+      mintLimit: { id: 1 },
+    },
+  });
+}
+
+/** 참가자 수령만 열고 개설자 그룹은 그대로 둔 뒤 가드 권한을 잠근다. */
+export function buildCreatorGuardLock(
+  input: Readonly<{
+    umi: Umi;
+    authority: Signer;
+    payer: Signer;
+    candyGuard: PublicKey | Pda;
+    lockAuthority: PublicKey;
+    creator: PublicKey;
+    allocation: number;
+    merkleRoot: Uint8Array | null;
+  }>,
+): TransactionBuilder {
+  const groups = [
+    ...(input.merkleRoot
+      ? [
+          {
+            label: 'claim',
+            guards: {
+              allowList: { merkleRoot: input.merkleRoot },
+              mintLimit: { id: 0, limit: 1 },
+              startDate: null,
+            },
+          },
+        ]
+      : []),
+    {
+      label: 'owner',
+      guards: {
+        addressGate: { address: input.creator },
+        mintLimit: { id: 1, limit: input.allocation },
+        startDate: { date: dateTime(0n) },
+      },
+    },
+  ];
+  return candy
+    .updateCandyGuard(input.umi, {
+      candyGuard: input.candyGuard,
+      authority: input.authority,
+      guards: {
+        startDate: { date: dateTime(CLAIM_BLOCK_START_DATE) },
+      },
+      groups,
+    })
+    .add(
+      candy.setCandyGuardAuthority(input.umi, {
+        candyGuard: input.candyGuard,
+        authority: input.authority,
+        newAuthority: input.lockAuthority,
+      }),
+    )
+    .setFeePayer(input.payer);
+}
+
+function creatorPaid(source: SeasonNftChainSource): boolean {
+  return source.supply != null && source.creatorWalletAddress != null;
+}
+
+function creatorAllocationOf(source: SeasonNftChainSource): number {
+  return Number(source.supply! - BigInt(source.eligibleCount) + 1n);
 }
 
 export abstract class SeasonNftRpcTransport {
@@ -943,6 +1069,88 @@ function assertCollection(
   }
 }
 
+function withCreatorBudget(builder: TransactionBuilder): TransactionBuilder {
+  const limit = 1_400_000;
+  return builder.prepend([
+    {
+      instruction: {
+        keys: [],
+        programId: publicKey('ComputeBudget111111111111111111111111111111'),
+        data: Uint8Array.from([
+          2,
+          ...[0, 8, 16, 24].map((shift) => (limit >>> shift) & 0xff),
+        ]),
+      },
+      signers: [],
+      bytesCreatedOnChain: 0,
+    },
+    {
+      instruction: {
+        keys: [],
+        programId: publicKey('ComputeBudget111111111111111111111111111111'),
+        data: Uint8Array.from([3, 0, 0, 0, 0, 0, 0, 0, 0]),
+      },
+      signers: [],
+      bytesCreatedOnChain: 0,
+    },
+  ]);
+}
+
+function assertCreatorMachine(
+  source: SeasonNftChainSource,
+  accounts: ReleaseAccounts,
+): void {
+  const machine = accounts.machine;
+  const guard = accounts.guard;
+  if (!machine && !guard) return;
+  if (!machine || !guard) {
+    throw new NftOperationPermanentError(
+      'NFT_MACHINE_PARTIAL_STATE',
+      'Candy Machine and Candy Guard must exist together.',
+    );
+  }
+  const owner = guard.groups.find((group) => group.label === 'owner');
+  const claim = guard.groups.find((group) => group.label === 'claim');
+  const hidden = machine.data.hiddenSettings;
+  if (
+    !hidden ||
+    !isSome(hidden) ||
+    hidden.value.name !== source.name ||
+    hidden.value.uri !== source.metadataUri ||
+    BigInt(machine.data.itemsAvailable) !== source.supply ||
+    !owner ||
+    Boolean(source.merkleRoot) !== Boolean(claim) ||
+    guard.groups.length !== (source.merkleRoot ? 2 : 1)
+  ) {
+    throw new NftOperationPermanentError(
+      'NFT_MACHINE_CONFIGURATION_INVALID',
+      'Existing creator Candy Machine settings do not match the frozen supply.',
+    );
+  }
+}
+
+function creatorClaimsReady(
+  source: SeasonNftChainSource,
+  accounts: ReleaseAccounts,
+  lock: PublicKey,
+): boolean {
+  const machine = accounts.machine;
+  const guard = accounts.guard;
+  const collection = accounts.collection;
+  if (!machine || !guard || !collection) return false;
+  const claim = guard.groups.find((group) => group.label === 'claim');
+  const claimsOpen = source.merkleRoot
+    ? Boolean(claim && isNone(claim.guards.startDate))
+    : !claim;
+  return (
+    claimsOpen &&
+    String(machine.authority) === String(lock) &&
+    String(guard.authority) === String(lock) &&
+    String(collection.updateAuthority) === String(lock) &&
+    BigInt(machine.data.itemsAvailable) === source.supply
+  );
+}
+
 function assertMachineAndGuard(
   source: SeasonNftChainSource,
   accounts: ReleaseAccounts,
@@ -990,6 +1198,7 @@ function assertMachineAndGuard(
     !isNone(machine.data.configLineSettings) ||
     String(machine.collectionMint) !== source.collectionAddress ||
     !isSome(allowList) ||
+    source.merkleRoot === null ||
     !equalBytes(allowList.value.merkleRoot, source.merkleRoot) ||
     !isSome(mintLimit) ||
     mintLimit.value.id !== 0 ||
@@ -1057,6 +1266,7 @@ function lockVerification(
       guard &&
       allowList &&
       isSome(allowList) &&
+      source.merkleRoot !== null &&
       equalBytes(allowList.value.merkleRoot, source.merkleRoot),
     ),
     supplyMatches: Boolean(
@@ -1217,10 +1427,14 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     );
     const addresses = [
       ...new Set(
-        usable.flatMap(({ identity }) => [
+        usable.flatMap(({ identity, transaction }) => [
           identity.source.collectionAddress!,
           identity.source.candyMachineAddress!,
           identity.source.candyGuardAddress!,
+          ...(transaction.operationKey?.startsWith('setup:creator-mint:') &&
+          transaction.assetAddress
+            ? [transaction.assetAddress]
+            : []),
         ]),
       ),
     ];
@@ -1247,6 +1461,28 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
         return {
           transactionId: transaction.id,
           accountEvidence: 'UNKNOWN' as const,
+        };
+      }
+      if (
+        transaction.operationKey?.startsWith('setup:creator-mint:') &&
+        transaction.assetAddress
+      ) {
+        const asset = byAddress.get(transaction.assetAddress);
+        const minted = Boolean(
+          asset?.exists && String(asset.owner) === CORE_PROGRAM_ID,
+        );
+        return {
+          transactionId: transaction.id,
+          accountEvidence: minted ? ('SUCCESS' as const) : ('ABSENT' as const),
+          ...(minted
+            ? {
+                reconciliationEvidence: {
+                  operationKey: transaction.operationKey,
+                  finalizedSlot: response.slot.toString(),
+                  observedAt: new Date().toISOString(),
+                },
+              }
+            : {}),
         };
       }
       const local = decodeReleaseAccounts(identity.umi, {
@@ -1402,7 +1638,9 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
           core.createCollection(umi, {
             collection: identity.collection,
             updateAuthority: service.publicKey,
-            payer: service,
+            payer: creatorPaid(source)
+              ? createNoopSigner(publicKey(source.creatorWalletAddress!))
+              : service,
             name: source.name,
             uri: source.metadataUri,
             plugins: [{ type: 'ImmutableMetadata' }],
@@ -1414,13 +1652,15 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       await this.advance(identity, 'METADATA', 'COLLECTION');
       return;
     }
-    assertMachineAndGuard(
-      source,
-      accounts,
-      service.publicKey,
-      identity.lock,
-      umi,
-    );
+    if (creatorPaid(source)) assertCreatorMachine(source, accounts);
+    else
+      assertMachineAndGuard(
+        source,
+        accounts,
+        service.publicKey,
+        identity.lock,
+        umi,
+      );
     if (source.stage === 'COLLECTION') {
       if (!accounts.machine && !accounts.guard) {
         await this.prepareOperation(
@@ -1435,8 +1675,18 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
             name: source.name,
             metadataUri: source.metadataUri,
             eligibleCount: source.eligibleCount,
-            merkleRoot: source.merkleRoot,
+            merkleRoot: source.merkleRoot ?? new Uint8Array(32),
             rentLamports: checkpoint.rentLamports!,
+            ...(creatorPaid(source)
+              ? {
+                  creator: {
+                    wallet: publicKey(source.creatorWalletAddress!),
+                    supply: Number(source.supply),
+                    allocation: creatorAllocationOf(source),
+                    merkleRoot: source.merkleRoot,
+                  },
+                }
+              : {}),
           }),
           checkpoint,
         );
@@ -1445,11 +1695,31 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       await this.advance(identity, 'COLLECTION', 'MACHINE');
       return;
     }
-    const verification = lockVerification(source, accounts, identity.lock, umi);
-    if (canOpenClaims(verification)) {
-      await this.advance(identity, 'MACHINE', 'LOCKED');
-      return;
+    if (creatorPaid(source)) {
+      const allocation = creatorAllocationOf(source);
+      if (source.creatorMintedCount < BigInt(allocation)) {
+        await this.prepareCreatorMint(identity, checkpoint);
+        return;
+      }
+      if (creatorClaimsReady(source, accounts, identity.lock)) {
+        await this.advance(identity, 'MACHINE', 'LOCKED');
+        return;
+      }
+    } else {
+      const verification = lockVerification(
+        source,
+        accounts,
+        identity.lock,
+        umi,
+      );
+      if (canOpenClaims(verification)) {
+        await this.advance(identity, 'MACHINE', 'LOCKED');
+        return;
+      }
     }
+    const creatorPayer = creatorPaid(source)
+      ? createNoopSigner(publicKey(source.creatorWalletAddress!))
+      : null;
     const machine = accounts.machine!;
     const collection = accounts.collection!;
     const guard = accounts.guard!;
@@ -1458,11 +1728,13 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
         identity,
         setupOperationKey('lock', 0),
         'SETUP_LOCK',
-        candy.setCandyMachineAuthority(umi, {
-          candyMachine: identity.machine.publicKey,
-          authority: service,
-          newAuthority: identity.lock,
-        }),
+        candy
+          .setCandyMachineAuthority(umi, {
+            candyMachine: identity.machine.publicKey,
+            authority: service,
+            newAuthority: identity.lock,
+          })
+          .setFeePayer(creatorPayer ?? service),
         checkpoint,
       );
       return;
@@ -1477,26 +1749,37 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
           collection: identity.collection.publicKey,
           authority: service,
           lockAuthority: identity.lock,
-        }),
+        }).setFeePayer(creatorPayer ?? service),
         checkpoint,
       );
       return;
     }
     if (
       String(guard.authority) === String(service.publicKey) &&
-      isSome(guard.guards.startDate)
+      (creatorPaid(source) || isSome(guard.guards.startDate))
     ) {
       await this.prepareOperation(
         identity,
         setupOperationKey('lock', 2),
         'SETUP_LOCK',
-        buildFinalGuardLock({
-          umi,
-          authority: service,
-          candyGuard: identity.guard,
-          lockAuthority: identity.lock,
-          merkleRoot: source.merkleRoot,
-        }),
+        creatorPaid(source)
+          ? buildCreatorGuardLock({
+              umi,
+              authority: service,
+              payer: creatorPayer!,
+              candyGuard: identity.guard,
+              lockAuthority: identity.lock,
+              creator: publicKey(source.creatorWalletAddress!),
+              allocation: creatorAllocationOf(source),
+              merkleRoot: source.merkleRoot,
+            })
+          : buildFinalGuardLock({
+              umi,
+              authority: service,
+              candyGuard: identity.guard,
+              lockAuthority: identity.lock,
+              merkleRoot: source.merkleRoot!,
+            }),
         checkpoint,
       );
       return;
@@ -1507,20 +1790,72 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     );
   }
 
+  private async prepareCreatorMint(
+    identity: ReleaseIdentity,
+    checkpoint: BlockhashCheckpoint,
+  ): Promise<void> {
+    const source = identity.source;
+    const index = Number(source.creatorMintedCount);
+    const operationKey = setupOperationKey('creator-mint', index);
+    const existing = await this.nftTransactions.findByOperation({
+      network: source.network,
+      releaseId: source.releaseId,
+      operationKey,
+    });
+    if (existing && ['FINALIZED', 'RECONCILED'].includes(existing.state)) {
+      await withDbOnlyRetry(() =>
+        this.transactions.run((databaseTransaction) =>
+          this.releases.incrementCreatorMinted(
+            {
+              releaseId: source.releaseId,
+              expectedVersion: source.version,
+              expectedCount: source.creatorMintedCount,
+            },
+            databaseTransaction,
+          ),
+        ),
+      );
+      this.checkpoints.delete(source.releaseId);
+      return;
+    }
+    const asset = generateSigner(identity.umi);
+    await this.prepareOperation(
+      identity,
+      operationKey,
+      'SETUP_CREATOR_MINT',
+      buildCreatorMint({
+        umi: identity.umi,
+        creator: publicKey(source.creatorWalletAddress!),
+        asset,
+        collection: identity.collection.publicKey,
+        candyMachine: identity.machine.publicKey,
+        candyGuard: identity.guard[0],
+      }),
+      checkpoint,
+      String(asset.publicKey),
+    );
+  }
+
   private async prepareOperation(
     identity: ReleaseIdentity,
     operationKey: string,
-    kind: 'SETUP_COLLECTION' | 'SETUP_MACHINE' | 'SETUP_LOCK',
+    kind:
+      | 'SETUP_COLLECTION'
+      | 'SETUP_MACHINE'
+      | 'SETUP_LOCK'
+      | 'SETUP_CREATOR_MINT',
     builder: TransactionBuilder,
     checkpoint: BlockhashCheckpoint,
+    assetAddress?: string,
   ): Promise<void> {
     const existing = await this.nftTransactions.findByOperation({
       network: identity.source.network,
       releaseId: identity.source.releaseId,
       operationKey,
     });
+    const creatorSigns = creatorPaid(identity.source);
     if (existing?.state === 'PREPARED') {
-      await this.promotePrepared(identity.umi, existing);
+      if (!creatorSigns) await this.promotePrepared(identity.umi, existing);
       return;
     }
     if (existing && ['FINALIZED', 'RECONCILED'].includes(existing.state)) {
@@ -1530,7 +1865,10 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       );
     }
     if (existing && !['FAILED', 'EXPIRED'].includes(existing.state)) return;
-    const transaction = await builder
+    const ready = creatorSigns
+      ? withCreatorBudget(builder).setVersion('legacy')
+      : builder;
+    const transaction = await ready
       .setBlockhash({
         blockhash: checkpoint.blockhash,
         lastValidBlockHeight: Number(checkpoint.lastValidBlockHeight),
@@ -1551,6 +1889,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       serializedTransaction: signedBytes,
       recentBlockhash: checkpoint.blockhash,
       lastValidBlockHeight: checkpoint.lastValidBlockHeight,
+      ...(assetAddress ? { assetAddress } : {}),
     } as const;
     const prepared = await withDbOnlyRetry(() =>
       this.transactions.run((databaseTransaction) =>
@@ -1570,7 +1909,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     );
     if (!durable)
       throw new Error('Prepared season NFT transaction disappeared.');
-    if (durable.state === 'PREPARED')
+    if (durable.state === 'PREPARED' && !creatorSigns)
       await this.promotePrepared(identity.umi, durable);
     this.checkpoints.delete(identity.source.releaseId);
   }
@@ -1647,6 +1986,25 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     );
     if (operationKey === setupOperationKey('collection', 0))
       return accounts.collection !== null;
+    if (creatorPaid(identity.source)) {
+      assertCreatorMachine(identity.source, accounts);
+      if (operationKey.startsWith('setup:creator-mint:')) return false;
+      if (operationKey === setupOperationKey('machine', 0)) {
+        return accounts.machine !== null && accounts.guard !== null;
+      }
+      if (operationKey === setupOperationKey('lock', 0)) {
+        return String(accounts.machine?.authority) === String(identity.lock);
+      }
+      if (operationKey === setupOperationKey('lock', 1)) {
+        return (
+          String(accounts.collection?.updateAuthority) === String(identity.lock)
+        );
+      }
+      if (operationKey === setupOperationKey('lock', 2)) {
+        return creatorClaimsReady(identity.source, accounts, identity.lock);
+      }
+      return false;
+    }
     assertMachineAndGuard(
       identity.source,
       accounts,

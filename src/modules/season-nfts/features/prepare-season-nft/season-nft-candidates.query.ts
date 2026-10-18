@@ -4,6 +4,10 @@ import { PG_POOL } from '../../../../database/pg.constants';
 import { getPgExecutor } from '../../../../database/transaction/pg-executor';
 import type { TransactionContext } from '../../../../database/transaction/transaction-context';
 import type { SeasonNftNetwork } from '../../resources/season-nft/season-nft';
+import {
+  CREATOR_MINT_ELIGIBILITY_SQL,
+  LEGACY_ELIGIBILITY_SQL,
+} from '../../resources/season-nft/season-nft-eligibility';
 
 export type SeasonNftEligibilitySourceRow = Readonly<{
   userId: string;
@@ -21,6 +25,10 @@ export type SeasonNftFreezeSource = Readonly<{
   title: string;
   description: string | null;
   endedAt: Date;
+  creatorId: string;
+  supply: bigint | null;
+  creatorWalletAddress: string | null;
+  nftDescription: string | null;
   eligibility: readonly SeasonNftEligibilitySourceRow[];
 }>;
 
@@ -91,9 +99,10 @@ export class SeasonNftCandidatesQuery {
     return result.rows.map((row) => row.id);
   }
 
-  /** 시즌 공통값과 completed 여부와 무관한 DISTINCT usage의 전체 지갑 관계를 읽는다. */
+  /** 시즌 공통값과 발행 수량에 맞는 받을 사람 명단을 읽는다. */
   async readFreezeSource(
     seasonId: string,
+    network: SeasonNftNetwork,
     transaction?: TransactionContext,
   ): Promise<SeasonNftFreezeSource | null> {
     const executor = getPgExecutor(this.pool, transaction);
@@ -102,34 +111,39 @@ export class SeasonNftCandidatesQuery {
       title: string;
       description: string | null;
       ends_at: Date;
+      creator_id: string;
+      supply: string | null;
+      creator_wallet_address: string | null;
+      nft_description: string | null;
     }>(
-      `SELECT s.canvas_id, s.title, s.description, c.ends_at
+      `SELECT s.canvas_id, s.title, s.description, c.ends_at, s.creator_id,
+              r.supply::text AS supply, r.creator_wallet_address, r.nft_description
        FROM seasons s
        JOIN canvases c ON c.id = s.canvas_id
+       LEFT JOIN season_nft_releases r
+         ON r.season_id = s.canvas_id AND r.network = $2
        WHERE s.canvas_id = $1 AND c.type = 'season'
-         AND c.ends_at <= CURRENT_TIMESTAMP
-         AND s.cancelled_at IS NULL AND s.force_ended_at IS NULL`,
-      [seasonId],
+         AND s.cancelled_at IS NULL
+         AND (r.supply IS NOT NULL OR s.force_ended_at IS NULL)
+         AND (s.force_ended_at IS NOT NULL OR c.ends_at <= CURRENT_TIMESTAMP)`,
+      [seasonId, network],
     );
-    if (!season.rows[0]) return null;
+    const row = season.rows[0];
+    if (!row) return null;
+    const creatorMint = row.supply !== null;
     const eligibility = await executor.query<EligibilityRow>(
-      `SELECT DISTINCT u.user_id, p.user_id AS participant_user_id,
-              p.wallet_account_id, p.wallet_address COLLATE "C" AS wallet_address,
-              w.id AS verified_wallet_id, w.user_id AS wallet_user_id,
-              w.address AS verified_address, w.chain_namespace
-       FROM canvas_stroke_usages u
-       LEFT JOIN season_participants p
-         ON p.season_id = u.canvas_id AND p.user_id = u.user_id
-       LEFT JOIN user_wallets w ON w.id = p.wallet_account_id
-       WHERE u.canvas_id = $1
-       ORDER BY p.wallet_address COLLATE "C" ASC NULLS FIRST, u.user_id ASC`,
+      creatorMint ? CREATOR_MINT_ELIGIBILITY_SQL : LEGACY_ELIGIBILITY_SQL,
       [seasonId],
     );
     return {
-      seasonId: season.rows[0].canvas_id,
-      title: season.rows[0].title,
-      description: season.rows[0].description,
-      endedAt: season.rows[0].ends_at,
+      seasonId: row.canvas_id,
+      title: row.title,
+      description: row.description,
+      endedAt: row.ends_at,
+      creatorId: row.creator_id,
+      supply: row.supply === null ? null : BigInt(row.supply),
+      creatorWalletAddress: row.creator_wallet_address,
+      nftDescription: row.nft_description,
       eligibility: eligibility.rows.map(toEligibility),
     };
   }

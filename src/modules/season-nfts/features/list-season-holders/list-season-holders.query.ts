@@ -9,6 +9,8 @@ export type SeasonHolderRecord = Readonly<{
   displayName: string | null;
   walletAddress: string;
   claimed: boolean;
+  isCreator: boolean;
+  creatorMintedCount: bigint;
 }>;
 
 export type SeasonHoldersSource = Readonly<{
@@ -23,6 +25,8 @@ type SeasonHoldersRow = Readonly<{
   display_name: string | null;
   wallet_address: string | null;
   claimed: boolean | null;
+  is_creator: boolean | null;
+  creator_minted_count: string | null;
 }>;
 
 /**
@@ -54,7 +58,8 @@ export class ListSeasonHoldersQuery {
                 release.id AS release_id,
                 release.network AS release_network,
                 CASE WHEN release.state = 'READY'
-                  THEN release.collection_address END AS collection_address
+                  THEN release.collection_address END AS collection_address,
+                COALESCE(release.creator_minted_count, 0)::text AS creator_minted_count
          FROM seasons s
          JOIN canvases c ON c.id = s.canvas_id AND c.type = 'season'
          LEFT JOIN season_nft_releases release
@@ -100,9 +105,9 @@ export class ListSeasonHoldersQuery {
          ORDER BY is_creator DESC, joined_at ASC, user_id ASC
          LIMIT $5 OFFSET $6
        )
-       SELECT season.collection_address,
+       SELECT season.collection_address, season.creator_minted_count,
               (SELECT count(*)::integer FROM holders) AS total,
-              page.display_name, page.wallet_address, page.claimed
+              page.display_name, page.wallet_address, page.claimed, page.is_creator
        FROM season
        LEFT JOIN page ON true
        ORDER BY page.is_creator DESC, page.joined_at ASC, page.user_id ASC`,
@@ -128,6 +133,8 @@ export class ListSeasonHoldersQuery {
                 displayName: row.display_name,
                 walletAddress: row.wallet_address,
                 claimed: row.claimed === true,
+                isCreator: row.is_creator === true,
+                creatorMintedCount: BigInt(row.creator_minted_count ?? '0'),
               },
             ],
       ),

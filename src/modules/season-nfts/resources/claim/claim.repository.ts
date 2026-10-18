@@ -119,6 +119,7 @@ export type ClaimBuildSource = Readonly<{
   candyMachineAddress: string;
   candyGuardAddress: string;
   merkleRoot: Uint8Array;
+  claimGroup: string | null;
 }>;
 
 export type ClaimReceiptSource = Readonly<{
@@ -131,6 +132,7 @@ export type ClaimReceiptSource = Readonly<{
   candyMachineAddress: string;
   candyGuardAddress: string;
   merkleRoot: Uint8Array;
+  claimGroup: string | null;
   knownMintSignature: string | null;
   receiptHistoryBefore: string | null;
 }>;
@@ -147,6 +149,7 @@ export type ClaimReconciliationSource = Readonly<{
   candyMachineAddress: string;
   candyGuardAddress: string;
   merkleRoot: Uint8Array;
+  claimGroup: string | null;
 }>;
 
 /** claim 소유권 조회와 claim, attempt 상태 전이를 release 잠금 아래 소유한다. */
@@ -175,12 +178,14 @@ export class ClaimRepository {
       candy_machine_address: string;
       candy_guard_address: string;
       merkle_root: Buffer;
+      claim_group: string | null;
     }>(
       `SELECT a.id AS attempt_id, c.id AS claim_id, r.id AS release_id,
               r.network, a.state AS attempt_state, a.step AS attempt_step,
               c.wallet_address, c.merkle_proof, a.asset_address,
               r.asset_name, r.metadata_uri, r.collection_address,
-              r.candy_machine_address, r.candy_guard_address, r.merkle_root
+              r.candy_machine_address, r.candy_guard_address, r.merkle_root,
+              r.claim_group
        FROM season_nft_claim_attempts a
        JOIN season_nft_claims c ON c.id = a.claim_id
        JOIN season_nft_releases r ON r.id = c.release_id
@@ -205,6 +210,7 @@ export class ClaimRepository {
       candyMachineAddress: row.candy_machine_address,
       candyGuardAddress: row.candy_guard_address,
       merkleRoot: Uint8Array.from(row.merkle_root),
+      claimGroup: row.claim_group,
     };
   }
 
@@ -220,12 +226,13 @@ export class ClaimRepository {
       candy_machine_address: string;
       candy_guard_address: string;
       merkle_root: Buffer;
+      claim_group: string | null;
       known_mint_signature: string | null;
       receipt_history_before: string | null;
     }>(
       `SELECT c.id AS claim_id, c.network, c.wallet_address, r.asset_name,
               r.metadata_uri, r.collection_address, r.candy_machine_address,
-              r.candy_guard_address, r.merkle_root,
+              r.candy_guard_address, r.merkle_root, r.claim_group,
               mt.signature AS known_mint_signature,
               c.receipt_history_before
        FROM season_nft_claims c
@@ -254,6 +261,7 @@ export class ClaimRepository {
           candyMachineAddress: row.candy_machine_address,
           candyGuardAddress: row.candy_guard_address,
           merkleRoot: Uint8Array.from(row.merkle_root),
+          claimGroup: row.claim_group,
           knownMintSignature: row.known_mint_signature,
           receiptHistoryBefore: row.receipt_history_before,
         }
@@ -277,12 +285,14 @@ export class ClaimRepository {
       candy_machine_address: string;
       candy_guard_address: string;
       merkle_root: Buffer;
+      claim_group: string | null;
     }>(
       `SELECT t.id AS transaction_id, t.state AS transaction_state, t.kind,
               c.id AS claim_id, a.id AS attempt_id,
               a.state AS attempt_state, c.wallet_address,
               COALESCE(t.asset_address, a.asset_address) AS asset_address,
-              r.candy_machine_address, r.candy_guard_address, r.merkle_root
+              r.candy_machine_address, r.candy_guard_address, r.merkle_root,
+              r.claim_group
        FROM season_nft_transactions t
        JOIN season_nft_claim_attempts a ON a.id = t.attempt_id
        JOIN season_nft_claims c ON c.id = a.claim_id
@@ -302,6 +312,7 @@ export class ClaimRepository {
       candyMachineAddress: row.candy_machine_address,
       candyGuardAddress: row.candy_guard_address,
       merkleRoot: Uint8Array.from(row.merkle_root),
+      claimGroup: row.claim_group,
     }));
   }
 
@@ -409,13 +420,31 @@ export class ClaimRepository {
       `SELECT s.canvas_id AS season_id,
               s.cancelled_at IS NOT NULL AS cancelled,
               s.force_ended_at IS NOT NULL AS force_ended,
-              c.ends_at <= CURRENT_TIMESTAMP AS ended,
+              s.force_ended_at IS NOT NULL OR c.ends_at <= CURRENT_TIMESTAMP AS ended,
               p.user_id IS NOT NULL AS participant,
               p.wallet_account_id AS participant_wallet_account_id,
               p.wallet_address AS participant_wallet_address,
-              EXISTS (
-                SELECT 1 FROM canvas_stroke_usages u
-                WHERE u.canvas_id = s.canvas_id AND u.user_id = $3
+              (
+                p.user_id IS NOT NULL
+                AND p.user_id <> s.creator_id
+                AND (
+                  (
+                    s.entry_fee_lamports > 0
+                    AND EXISTS (
+                      SELECT 1 FROM season_entry_payments payment
+                      WHERE payment.season_id = s.canvas_id
+                        AND payment.user_id = p.user_id
+                        AND payment.status = 'CONFIRMED'
+                    )
+                  )
+                  OR (
+                    s.entry_fee_lamports = 0
+                    AND EXISTS (
+                      SELECT 1 FROM canvas_stroke_usages u
+                      WHERE u.canvas_id = s.canvas_id AND u.user_id = p.user_id
+                    )
+                  )
+                )
               ) AS has_usage,
               r.id AS release_id, r.state AS release_state,
               nc.id AS claim_id, nc.state AS claim_state,
