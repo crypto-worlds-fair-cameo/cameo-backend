@@ -311,6 +311,7 @@ function runtimeFixture(pool, rpc) {
 
 test('normal season end reaches two claims through real use cases, runtime, dispatcher, and restart recovery', async () => {
   const { pool } = await testDatabaseModule();
+  const creator = await actor(pool);
   const members = [await actor(pool), await actor(pool)];
   const seasonId = randomUUID();
   await pool.query(
@@ -325,7 +326,7 @@ test('normal season end reaches two claims through real use cases, runtime, disp
   await pool.query(
     `INSERT INTO seasons (canvas_id, creator_id, title, description, capacity)
      VALUES ($1, $2, 'End to End', 'Two members', 2)`,
-    [seasonId, members[0].userId],
+    [seasonId, creator.userId],
   );
   for (const member of members) {
     await pool.query(
