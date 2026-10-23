@@ -390,35 +390,8 @@ export class NftRuntimeQueue extends NftWorkerQueue {
     for (const pending of work) void pending.catch(() => undefined);
   }
 
-  async scanCandidates(scheduler: NftRpcScheduler): Promise<void> {
-    const runtime = this.config.read();
-    if (!runtime.enabled || !runtime.network) return;
-    const capacity = this.reserveStorageWork(MAX_ACTIVE_STORAGE_WORK);
-    let seasonIds;
-    try {
-      seasonIds = await this.candidates.findUnreleased(
-        runtime.network,
-        capacity,
-      );
-    } catch (error: unknown) {
-      this.releaseStorageWork(capacity);
-      throw error;
-    }
-    this.releaseStorageWork(capacity - seasonIds.length);
-    for (const seasonId of seasonIds) {
-      if (this.activeCandidates.has(seasonId)) {
-        this.releaseStorageWork(1);
-        continue;
-      }
-      this.activeCandidates.add(seasonId);
-      void scheduler
-        .enqueueStorage(() => this.preparation.execute(seasonId))
-        .catch(() => undefined)
-        .finally(() => {
-          this.activeCandidates.delete(seasonId);
-          this.releaseStorageWork(1);
-        });
-    }
+  async scanCandidates(): Promise<void> {
+    // 끝난 시즌도 개설자가 발행을 요청하기 전에는 release를 만들지 않는다.
   }
 
   private async enqueueReleaseChain(

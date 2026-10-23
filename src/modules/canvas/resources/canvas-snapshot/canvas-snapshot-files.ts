@@ -693,6 +693,8 @@ export class CanvasSnapshotFiles {
   }
 
   private async syncDirectory(directory: string): Promise<void> {
+    // Windows는 디렉터리 fsync를 EPERM으로 거절한다. NTFS가 디렉터리 항목을 자체 저널로 보존한다.
+    if (process.platform === 'win32') return;
     const handle = await fs.open(directory, 'r');
     try {
       await handle.sync();

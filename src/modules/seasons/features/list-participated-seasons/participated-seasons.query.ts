@@ -37,6 +37,9 @@ type ParticipatedSeasonRow = Readonly<{
   observed_at: Date;
   participant_wallet_address: string;
   own_stroke_count: number;
+  is_creator: boolean;
+  entry_fee_lamports: string;
+  has_confirmed_payment: boolean;
   final_image_key: string | null;
   release_state: SeasonNftReleaseState | null;
   release_stage: SeasonNftReleaseStage | null;
@@ -45,6 +48,7 @@ type ParticipatedSeasonRow = Readonly<{
   asset_name: string | null;
   image_uri: string | null;
   metadata_uri: string | null;
+  last_error_code: string | null;
   claim_state: SeasonNftClaimState | null;
   claim_wallet_address: string | null;
   active_attempt_id: string | null;
@@ -105,10 +109,18 @@ export class ParticipatedSeasonsQuery {
               CURRENT_TIMESTAMP AS observed_at,
               participant.wallet_address AS participant_wallet_address,
               COALESCE(usage.stroke_count, 0)::integer AS own_stroke_count,
+              season.creator_id = $1 AS is_creator,
+              season.entry_fee_lamports::text AS entry_fee_lamports,
+              EXISTS (
+                SELECT 1 FROM season_entry_payments payment
+                WHERE payment.season_id = season.canvas_id
+                  AND payment.user_id = $1
+                  AND payment.status = 'CONFIRMED'
+              ) AS has_confirmed_payment,
               final_snapshot.image_key AS final_image_key,
               release.state AS release_state, release.stage AS release_stage,
               release.snapshot_id, release.eligible_count, release.asset_name,
-              release.image_uri, release.metadata_uri,
+              release.image_uri, release.metadata_uri, release.last_error_code,
               claim.state AS claim_state,
               claim.wallet_address AS claim_wallet_address,
               attempt.id AS active_attempt_id, claim.asset_address,
@@ -153,6 +165,7 @@ function toRecord(row: ParticipatedSeasonRow): ParticipatedSeasonRecord {
           assetName: row.asset_name,
           imageUri: row.image_uri,
           metadataUri: row.metadata_uri,
+          lastErrorCode: row.last_error_code,
         };
   const claim: SeasonNftViewSource['claim'] =
     row.claim_state === null ||
@@ -188,6 +201,9 @@ function toRecord(row: ParticipatedSeasonRow): ParticipatedSeasonRecord {
       observedAt: row.observed_at,
       participantWalletAddress: row.participant_wallet_address,
       ownStrokeCount: row.own_stroke_count,
+      isCreator: row.is_creator,
+      entryFeeLamports: row.entry_fee_lamports,
+      hasConfirmedPayment: row.has_confirmed_payment,
       release,
       claim,
     },

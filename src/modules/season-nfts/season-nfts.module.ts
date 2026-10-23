@@ -52,11 +52,17 @@ import {
 import { GetSeasonNftController } from './features/get-season-nft/get-season-nft.controller';
 import { GetSeasonNftQuery } from './features/get-season-nft/get-season-nft.query';
 import { GetSeasonNftUseCase } from './features/get-season-nft/get-season-nft.use-case';
+import { ListSeasonHoldersController } from './features/list-season-holders/list-season-holders.controller';
+import { ListSeasonHoldersQuery } from './features/list-season-holders/list-season-holders.query';
+import { ListSeasonHoldersUseCase } from './features/list-season-holders/list-season-holders.use-case';
 import { CreateClaimAttemptController } from './features/create-claim-attempt/create-claim-attempt.controller';
 import { CreateClaimAttemptUseCase } from './features/create-claim-attempt/create-claim-attempt.use-case';
 import { GetClaimAttemptController } from './features/get-claim-attempt/get-claim-attempt.controller';
 import { GetClaimAttemptUseCase } from './features/get-claim-attempt/get-claim-attempt.use-case';
 import { SubmitClaimTransactionController } from './features/submit-claim-transaction/submit-claim-transaction.controller';
+import { RequestSeasonNftMintController } from './features/request-season-nft-mint/request-season-nft-mint.controller';
+import { RequestSeasonNftMintUseCase } from './features/request-season-nft-mint/request-season-nft-mint.use-case';
+import { SeasonNftMintQuery } from './features/request-season-nft-mint/season-nft-mint.query';
 import { SubmitClaimTransactionUseCase } from './features/submit-claim-transaction/submit-claim-transaction.use-case';
 import {
   SeasonClaimChain,
@@ -70,14 +76,18 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
   imports: [AuthModule, CanvasModule],
   controllers: [
     GetSeasonNftController,
+    ListSeasonHoldersController,
     CreateClaimAttemptController,
     GetClaimAttemptController,
     SubmitClaimTransactionController,
+    RequestSeasonNftMintController,
   ],
   providers: [
     CreateClaimAttemptUseCase,
     GetClaimAttemptUseCase,
     SubmitClaimTransactionUseCase,
+    RequestSeasonNftMintUseCase,
+    SeasonNftMintQuery,
     ReconcileNftTransactionsUseCase,
     {
       provide: NftClaimReconciliation,
@@ -85,6 +95,8 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
     },
     GetSeasonNftQuery,
     GetSeasonNftUseCase,
+    ListSeasonHoldersQuery,
+    ListSeasonHoldersUseCase,
     SeasonNftRepository,
     ClaimRepository,
     NftTransactionRepository,

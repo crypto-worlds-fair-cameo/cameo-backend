@@ -91,8 +91,15 @@ export class JoinSeasonUseCase {
         if (getSeasonStatus(season, time) !== 'active') {
           throw new BusinessError(ErrorCodes.SeasonStateConflict);
         }
-        if (participation.participantCount >= season.capacity) {
+        if (
+          season.capacity !== null &&
+          participation.participantCount >= season.capacity
+        ) {
           throw new BusinessError(ErrorCodes.SeasonCapacityReached);
+        }
+        // 유료 시즌은 확정된 입장료 거래만 참가 기록을 만든다.
+        if (season.entryFeeLamports !== '0') {
+          throw new BusinessError(ErrorCodes.SeasonEntryPaymentRequired);
         }
 
         await this.seasons.addParticipant(

@@ -5,15 +5,20 @@ import type {
   SeasonNftReleaseStage,
   SeasonNftReleaseState,
 } from './season-nft';
+import { SeasonNftInternalErrorCodes } from './season-nft.error-codes';
 
 export type SeasonNftAvailability =
   'WAITING_FOR_END' | 'PREPARING' | 'READY' | 'EMPTY' | 'UNAVAILABLE';
 
 export type SeasonNftUnavailableReason =
-  'CANCELLED' | 'FORCE_ENDED' | 'FEATURE_DISABLED' | null;
+  | 'CANCELLED'
+  | 'FORCE_ENDED'
+  | 'FEATURE_DISABLED'
+  | 'TOO_MANY_CONTRIBUTORS'
+  | null;
 
 export type SeasonNftClaimEligibility =
-  'ELIGIBLE' | 'NOT_PARTICIPANT' | 'NO_VALID_STROKE';
+  'ELIGIBLE' | 'NOT_PARTICIPANT' | 'NO_VALID_STROKE' | 'CREATOR';
 
 export type SeasonNftClaimView = Readonly<{
   eligibility: SeasonNftClaimEligibility;
@@ -47,6 +52,9 @@ export type SeasonNftViewSource = Readonly<{
   observedAt: Date;
   participantWalletAddress: string | null;
   ownStrokeCount: number;
+  isCreator: boolean;
+  entryFeeLamports: string;
+  hasConfirmedPayment: boolean;
   release: Readonly<{
     state: SeasonNftReleaseState;
     stage: SeasonNftReleaseStage;
@@ -55,6 +63,7 @@ export type SeasonNftViewSource = Readonly<{
     assetName: string | null;
     imageUri: string | null;
     metadataUri: string | null;
+    lastErrorCode: string | null;
   }> | null;
   claim: Readonly<{
     state: SeasonNftClaimState;
@@ -76,19 +85,26 @@ export function toSeasonNftView(
   let availability: SeasonNftAvailability;
   let reason: SeasonNftUnavailableReason = null;
 
-  // 취소와 강제 종료는 기능 설정이나 release보다 우선하여 영구 수령 불가로 표시한다.
+  // 취소만 영구 수령 불가다. 조기 종료는 개설자가 발행할 수 있는 종료다.
+  const seasonEnded =
+    source.forceEndedAt !== null ||
+    source.observedAt.getTime() >= source.endsAt.getTime();
   if (source.cancelledAt !== null) {
     availability = 'UNAVAILABLE';
     reason = 'CANCELLED';
-  } else if (source.forceEndedAt !== null) {
-    availability = 'UNAVAILABLE';
-    reason = 'FORCE_ENDED';
   } else if (!options.enabled) {
     // 비활성화는 새 수령을 막지만 아래의 기존 release와 claim 증거는 그대로 보존한다.
     availability = 'UNAVAILABLE';
     reason = 'FEATURE_DISABLED';
-  } else if (source.observedAt.getTime() < source.endsAt.getTime()) {
+  } else if (!seasonEnded) {
     availability = 'WAITING_FOR_END';
+  } else if (
+    release?.state === 'BLOCKED' &&
+    release.lastErrorCode === SeasonNftInternalErrorCodes.TooManyContributors
+  ) {
+    // 다른 BLOCKED 원인과 달리 운영 조치로 풀리지 않는 영구 미발행이므로 원인을 공개한다.
+    availability = 'UNAVAILABLE';
+    reason = 'TOO_MANY_CONTRIBUTORS';
   } else if (release?.state === 'EMPTY') {
     availability = 'EMPTY';
   } else if (release?.state === 'READY') {
@@ -98,12 +114,19 @@ export function toSeasonNftView(
     availability = 'PREPARING';
   }
 
+  const paidSeason = source.entryFeeLamports !== '0';
+  const canClaim =
+    source.participantWalletAddress !== null &&
+    !source.isCreator &&
+    (paidSeason ? source.hasConfirmedPayment : source.ownStrokeCount >= 1);
   const eligibility: SeasonNftClaimEligibility =
     source.participantWalletAddress === null
       ? 'NOT_PARTICIPANT'
-      : source.ownStrokeCount < 1
-        ? 'NO_VALID_STROKE'
-        : 'ELIGIBLE';
+      : source.isCreator
+        ? 'CREATOR'
+        : canClaim
+          ? 'ELIGIBLE'
+          : 'NO_VALID_STROKE';
   const claim = source.claim;
   const isParticipant = source.participantWalletAddress !== null;
 

@@ -46,6 +46,8 @@ export type SeasonConnectionReady = {
     width: number;
     height: number;
     strokeLimitPerUser: number | null;
+    /** ready 시점에 이 사용자가 쓴 획 수. 손님은 null이다. */
+    strokesUsed: number | null;
     startsAt: string;
     endsAt: string;
     cancelledAt: string | null;

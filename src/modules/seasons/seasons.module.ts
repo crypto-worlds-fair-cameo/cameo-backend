@@ -13,10 +13,17 @@ import { JoinSeasonController } from './features/join-season/join-season.control
 import { JoinSeasonUseCase } from './features/join-season/join-season.use-case';
 import { ListSeasonsController } from './features/list-seasons/list-seasons.controller';
 import { ListSeasonsUseCase } from './features/list-seasons/list-seasons.use-case';
+import { HostedSeasonsQuery } from './features/list-hosted-seasons/hosted-seasons.query';
+import { ListHostedSeasonsController } from './features/list-hosted-seasons/list-hosted-seasons.controller';
+import { ListHostedSeasonsUseCase } from './features/list-hosted-seasons/list-hosted-seasons.use-case';
 import { ListParticipatedSeasonsController } from './features/list-participated-seasons/list-participated-seasons.controller';
 import { ListParticipatedSeasonsUseCase } from './features/list-participated-seasons/list-participated-seasons.use-case';
 import { ParticipatedSeasonsQuery } from './features/list-participated-seasons/participated-seasons.query';
+import { PaySeasonEntryController } from './features/pay-season-entry/pay-season-entry.controller';
+import { PaySeasonEntryUseCase } from './features/pay-season-entry/pay-season-entry.use-case';
 import { SeasonRepository } from './resources/season/season.repository';
+import { SeasonEntryChain } from './resources/season-entry-payment/season-entry-chain';
+import { SeasonEntryPaymentRepository } from './resources/season-entry-payment/season-entry-payment.repository';
 
 @Module({
   imports: [AuthModule, CanvasModule],
@@ -25,8 +32,10 @@ import { SeasonRepository } from './resources/season/season.repository';
     CancelSeasonController,
     EndSeasonController,
     ListParticipatedSeasonsController,
+    ListHostedSeasonsController,
     GetSeasonController,
     JoinSeasonController,
+    PaySeasonEntryController,
     ListSeasonsController,
   ],
   providers: [
@@ -35,10 +44,15 @@ import { SeasonRepository } from './resources/season/season.repository';
     EndSeasonUseCase,
     ListParticipatedSeasonsUseCase,
     ParticipatedSeasonsQuery,
+    ListHostedSeasonsUseCase,
+    HostedSeasonsQuery,
     GetSeasonUseCase,
     JoinSeasonUseCase,
+    PaySeasonEntryUseCase,
     ListSeasonsUseCase,
     SeasonRepository,
+    SeasonEntryChain,
+    SeasonEntryPaymentRepository,
   ],
 })
 export class SeasonsModule {}

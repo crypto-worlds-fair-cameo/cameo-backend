@@ -334,7 +334,7 @@ test('GET season NFT authenticates and exposes exact user-scoped view precedence
 
   const cases = [
     [cancelled, 'UNAVAILABLE', 'CANCELLED'],
-    [forced, 'UNAVAILABLE', 'FORCE_ENDED'],
+    [forced, 'PREPARING', null],
     [waiting, 'WAITING_FOR_END', null],
     [blocked, 'PREPARING', null],
     [empty, 'EMPTY', null],
@@ -367,7 +367,7 @@ test('GET season NFT authenticates and exposes exact user-scoped view precedence
     .data;
   assert.equal(waitingView.eligibleCount, null);
   assert.deepEqual(waitingView.claim, {
-    eligibility: 'NO_VALID_STROKE',
+    eligibility: 'CREATOR',
     state: 'UNCLAIMED',
     walletAddress: viewer.walletAddress,
     activeAttemptId: null,
@@ -604,6 +604,102 @@ test('participated pagination validates numeric strings and follows unknown-fiel
     limit: 20,
     offset: 0,
   });
+});
+
+test('GET hosted returns only my seasons, newest first, with participants and final images', async () => {
+  const unauthenticated = await json('/seasons/hosted', undefined);
+  assert.equal(unauthenticated.response.status, 401);
+  assert.equal(unauthenticated.body.code, 'AUTH_SESSION_INVALID');
+
+  const host = await actor();
+  const member = await actor();
+  const outsider = await actor();
+  const ended = await season(host, { title: 'Hosted ended' });
+  const cancelled = await season(host, {
+    title: 'Hosted cancelled',
+    cancelled: true,
+  });
+  const active = await season(host, {
+    title: 'Hosted active',
+    startsAt: new Date(Date.now() - 60_000),
+    endsAt: new Date(Date.now() + 86_400_000),
+  });
+  await server.pool.query(
+    `UPDATE seasons
+        SET created_at = CURRENT_TIMESTAMP - make_interval(mins => $2)
+      WHERE canvas_id = $1`,
+    [ended, 3],
+  );
+  await server.pool.query(
+    `UPDATE seasons
+        SET created_at = CURRENT_TIMESTAMP - make_interval(mins => $2)
+      WHERE canvas_id = $1`,
+    [cancelled, 2],
+  );
+  await participate(ended, host);
+  await participate(ended, member);
+  await participate(active, member);
+  const snapshot = await finalSnapshot(ended);
+  await season(outsider);
+  await participate(active, outsider);
+
+  const all = await json('/seasons/hosted', host.token);
+  assert.equal(all.response.status, 200);
+  assert.equal(all.response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(all.body.data, {
+    items: [
+      {
+        seasonId: active,
+        title: 'Hosted active',
+        lifecycleStatus: 'active',
+        startsAt: all.body.data.items[0].startsAt,
+        endsAt: all.body.data.items[0].endsAt,
+        participantCount: 2,
+        finalImageUrl: null,
+      },
+      {
+        seasonId: cancelled,
+        title: 'Hosted cancelled',
+        lifecycleStatus: 'cancelled',
+        startsAt: all.body.data.items[1].startsAt,
+        endsAt: all.body.data.items[1].endsAt,
+        participantCount: 0,
+        finalImageUrl: null,
+      },
+      {
+        seasonId: ended,
+        title: 'Hosted ended',
+        lifecycleStatus: 'ended',
+        startsAt: all.body.data.items[2].startsAt,
+        endsAt: all.body.data.items[2].endsAt,
+        participantCount: 2,
+        finalImageUrl: `https://assets.example.test/${snapshot.imageKey}`,
+      },
+    ],
+    total: 3,
+    limit: 20,
+    offset: 0,
+  });
+
+  const page = await json('/seasons/hosted?limit=1&offset=1', host.token);
+  assert.equal(page.body.data.total, 3);
+  assert.deepEqual(
+    page.body.data.items.map((item) => item.seasonId),
+    [cancelled],
+  );
+
+  const none = await json('/seasons/hosted', member.token);
+  assert.deepEqual(none.body.data, {
+    items: [],
+    total: 0,
+    limit: 20,
+    offset: 0,
+  });
+
+  for (const query of ['limit=0', 'limit=51', 'offset=-1', 'offset=1.5']) {
+    const result = await request(`/seasons/hosted?${query}`, host.token);
+    assert.equal(result.status, 400, query);
+  }
 });
 
 test('Swagger documents both read contracts and their configuration failure', async () => {

@@ -141,7 +141,7 @@ export class ListCanvasHistoryController {
   @ApiOperation({
     summary: '캔버스 히스토리 조회',
     description:
-      '메인·공개 시즌 캔버스의 READY 스냅샷을 캡처 시각과 ID의 내림차순으로 조회합니다. 취소된 시즌은 개설자만 조회할 수 있습니다. 잘못되거나 사용할 수 없는 세션은 익명으로 처리합니다. nextCursor는 해석하거나 수정하지 말고 다음 요청에 그대로 전달합니다.',
+      '메인·공개 시즌 캔버스의 READY 스냅샷을 캡처 시각과 ID의 내림차순으로 조회합니다. 취소된 시즌은 개설자만, 지갑 보유자 전용 시즌은 로그인한 사용자만 조회할 수 있습니다. 잘못되거나 사용할 수 없는 세션은 익명으로 처리합니다. nextCursor는 해석하거나 수정하지 말고 다음 요청에 그대로 전달합니다.',
     security: [{}, { session: [] }],
   })
   @ApiParam({

@@ -27,8 +27,9 @@ export type ListSeasonsInput = Readonly<{
 
 type SeasonWriteInput = Pick<
   NormalizedSeasonInput,
-  'title' | 'description' | 'capacity'
->;
+  'title' | 'description' | 'capacity' | 'entryRule' | 'entryFeeLamports'
+> &
+  Readonly<{ entryFeeRecipient: string | null }>;
 
 @Injectable()
 export class SeasonRepository {
@@ -64,14 +65,18 @@ export class SeasonRepository {
   ): Promise<void> {
     await getPgExecutor(this.pool, transaction).query(
       `INSERT INTO seasons
-         (canvas_id, creator_id, title, description, capacity, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+         (canvas_id, creator_id, title, description, capacity, entry_rule,
+          entry_fee_lamports, entry_fee_recipient, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         canvasId,
         creatorId,
         input.title,
         input.description,
         input.capacity,
+        input.entryRule,
+        input.entryFeeLamports.toString(),
+        input.entryFeeRecipient,
         time,
       ],
     );
@@ -234,7 +239,8 @@ export class SeasonRepository {
     ).query<SeasonRecord>(
       `WITH candidates AS MATERIALIZED (
          SELECT s.canvas_id, s.creator_id, s.title, s.description,
-                s.capacity, s.cancelled_at, s.force_ended_at, s.created_at,
+                s.capacity, s.entry_rule, s.entry_fee_lamports,
+                s.cancelled_at, s.force_ended_at, s.created_at,
                 c.width, c.height, c.stroke_limit_per_user,
                 c.starts_at, c.ends_at
          FROM seasons s
@@ -260,7 +266,9 @@ export class SeasonRepository {
        SELECT c.canvas_id AS id, c.creator_id AS "creatorId",
               c.title, c.description, c.width, c.height,
               c.stroke_limit_per_user AS "strokeLimitPerUser",
-              c.capacity, COALESCE(p.count, 0)::integer AS "participantCount",
+              c.capacity, c.entry_rule AS "entryRule",
+              c.entry_fee_lamports::text AS "entryFeeLamports",
+              COALESCE(p.count, 0)::integer AS "participantCount",
               c.starts_at AS "startsAt", c.ends_at AS "endsAt",
               c.cancelled_at AS "cancelledAt",
               c.force_ended_at AS "forceEndedAt",
@@ -303,7 +311,8 @@ export class SeasonRepository {
       `SELECT s.canvas_id AS id, s.creator_id AS "creatorId",
               s.title, s.description, c.width, c.height,
               c.stroke_limit_per_user AS "strokeLimitPerUser",
-              s.capacity,
+              s.capacity, s.entry_rule AS "entryRule",
+              s.entry_fee_lamports::text AS "entryFeeLamports",
               (SELECT count(*)::integer FROM season_participants p
                WHERE p.season_id = s.canvas_id) AS "participantCount",
               c.starts_at AS "startsAt", c.ends_at AS "endsAt",

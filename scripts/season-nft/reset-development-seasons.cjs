@@ -426,6 +426,10 @@ async function resetDevelopmentSeasons({
         [seasonIds],
       );
       await client.query(
+        'DELETE FROM season_entry_payments WHERE season_id = ANY($1::uuid[])',
+        [seasonIds],
+      );
+      await client.query(
         'DELETE FROM season_participants WHERE season_id = ANY($1::uuid[])',
         [seasonIds],
       );

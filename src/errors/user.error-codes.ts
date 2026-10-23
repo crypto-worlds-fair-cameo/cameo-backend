@@ -23,4 +23,11 @@ export const UserErrorCodes = {
     message: 'Profile image upload is not available.',
     description: '서버에 프로필 사진 저장소가 설정되지 않았습니다.',
   },
+  UserBalanceUnavailable: {
+    statusCode: 503,
+    code: 'USER_BALANCE_UNAVAILABLE',
+    message: 'Wallet balance is not available.',
+    description:
+      '서버에 Solana network·RPC가 설정되지 않았거나 RPC가 잔액 조회에 응답하지 않았습니다.',
+  },
 } as const satisfies Record<string, BusinessErrorDefinition>;

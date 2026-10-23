@@ -4,13 +4,17 @@ import { getSeasonStatus, type SeasonStatus } from './season-state';
 
 export { getSeasonStatus, type SeasonStatus } from './season-state';
 
+export type SeasonEntryRule = 'anyone' | 'wallet_holders';
+
 export type CreateSeasonInput = Readonly<{
   title: string;
   description?: string;
   width?: number;
   height?: number;
   strokeLimitPerUser?: number | null;
-  capacity: number;
+  capacity: number | null;
+  entryRule?: SeasonEntryRule;
+  entryFeeLamports?: string;
   startsAt?: string;
   endsAt: string;
 }>;
@@ -21,7 +25,9 @@ export type NormalizedSeasonInput = Readonly<{
   width: number;
   height: number;
   strokeLimitPerUser: number | null;
-  capacity: number;
+  capacity: number | null;
+  entryRule: SeasonEntryRule;
+  entryFeeLamports: bigint;
   startsAt: Date;
   endsAt: Date;
 }>;
@@ -34,7 +40,9 @@ export type SeasonRecord = Readonly<{
   width: number;
   height: number;
   strokeLimitPerUser: number | null;
-  capacity: number;
+  capacity: number | null;
+  entryRule: SeasonEntryRule;
+  entryFeeLamports: string;
   participantCount: number;
   startsAt: Date;
   endsAt: Date;
@@ -62,11 +70,15 @@ const DEFAULT_STROKE_LIMIT = 1;
 const MIN_DIMENSION = 500;
 const MAX_DIMENSION = 10000;
 const MAX_TITLE_CODE_POINTS = 50;
-const MAX_DESCRIPTION_CODE_POINTS = 100;
+const MAX_DESCRIPTION_CODE_POINTS = 1000;
 const MIN_CAPACITY = 2;
 const MAX_CAPACITY = 100;
 const MIN_STROKE_LIMIT = 1;
 const MAX_STROKE_LIMIT = 10;
+// 0.001 SOL 미만은 빈 수령 지갑의 rent-exempt 최소 잔액보다 작아 전송이 실패할 수 있다.
+const MIN_ENTRY_FEE_LAMPORTS = 1_000_000n;
+const MAX_ENTRY_FEE_LAMPORTS = 100_000_000_000n;
+const LAMPORTS_PATTERN = /^(?:0|[1-9][0-9]{0,11})$/;
 const HOUR_MS = 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * HOUR_MS;
 const ISO_DATE_TIME_PATTERN =
@@ -202,7 +214,24 @@ export function normalizeSeasonInput(
         MIN_STROKE_LIMIT,
         MAX_STROKE_LIMIT,
       )) ||
-    !isIntegerInRange(input.capacity, MIN_CAPACITY, MAX_CAPACITY)
+    (input.capacity !== null &&
+      !isIntegerInRange(input.capacity, MIN_CAPACITY, MAX_CAPACITY))
+  ) {
+    return invalidInput();
+  }
+
+  // 입장 규칙은 생략하면 누구나 관람하는 기존 공개 시즌이다.
+  const entryRule = input.entryRule ?? 'anyone';
+  if (entryRule !== 'anyone' && entryRule !== 'wallet_holders')
+    return invalidInput();
+  const feeSource = input.entryFeeLamports ?? '0';
+  if (typeof feeSource !== 'string' || !LAMPORTS_PATTERN.test(feeSource))
+    return invalidInput();
+  const entryFeeLamports = BigInt(feeSource);
+  if (
+    entryFeeLamports !== 0n &&
+    (entryFeeLamports < MIN_ENTRY_FEE_LAMPORTS ||
+      entryFeeLamports > MAX_ENTRY_FEE_LAMPORTS)
   ) {
     return invalidInput();
   }
@@ -231,6 +260,8 @@ export function normalizeSeasonInput(
     height,
     strokeLimitPerUser,
     capacity: input.capacity,
+    entryRule,
+    entryFeeLamports,
     startsAt,
     endsAt,
   };

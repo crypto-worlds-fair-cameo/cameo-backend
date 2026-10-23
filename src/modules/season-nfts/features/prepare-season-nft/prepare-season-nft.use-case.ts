@@ -54,7 +54,6 @@ type ValidEligibility = Readonly<{
 function validateEligibility(
   rows: readonly SeasonNftEligibilitySourceRow[],
 ): ValidEligibility[] | null {
-  if (rows.length > 100) return null;
   const wallets = new Set<string>();
   const valid: ValidEligibility[] = [];
   for (const row of rows) {
@@ -163,7 +162,10 @@ export class PrepareSeasonNftUseCase {
       };
     }
 
-    const source = await this.candidates.readFreezeSource(seasonId);
+    const source = await this.candidates.readFreezeSource(
+      seasonId,
+      network as SeasonNftNetwork,
+    );
     if (!source) {
       const blocked = await this.block(
         candidate.releaseId,
@@ -177,11 +179,38 @@ export class PrepareSeasonNftUseCase {
       };
     }
     const eligibility = validateEligibility(source.eligibility);
-    const keys = eligibility?.map((member) => member.publicKey) ?? [];
+    if (source.supply !== null) {
+      const creator = eligibility?.find(
+        (member) => member.userId === source.creatorId,
+      );
+      if (
+        !eligibility ||
+        !creator ||
+        creator.walletAddress !== source.creatorWalletAddress ||
+        source.supply < BigInt(eligibility.length)
+      ) {
+        const blocked = await this.block(
+          candidate.releaseId,
+          candidate.version,
+          SeasonNftInternalErrorCodes.SupplyBelowEligible,
+          'Season NFT supply does not cover eligible wallets.',
+        );
+        return {
+          releaseId: candidate.releaseId,
+          status: blocked ? 'BLOCKED' : 'RETRY',
+        };
+      }
+    }
+    // 개설자 몫은 지갑으로 바로 넣고, 머클에는 나머지 참가자만 남긴다.
+    const claimMembers =
+      source.supply === null
+        ? eligibility
+        : eligibility?.filter((member) => member.userId !== source.creatorId);
+    const keys = claimMembers?.map((member) => member.publicKey) ?? [];
     // 유효 명단은 같은 SDK 계산을 두 번 대조한 뒤 첫 결과만 immutable freeze에 전달한다.
-    const artifacts = eligibility ? this.merkleArtifacts.build(keys) : null;
+    const artifacts = claimMembers ? this.merkleArtifacts.build(keys) : null;
     const claims =
-      eligibility?.map((member, index) => ({
+      claimMembers?.map((member, index) => ({
         userId: member.userId,
         walletAccountId: member.walletAccountId,
         walletAddress: member.walletAddress,
@@ -200,7 +229,7 @@ export class PrepareSeasonNftUseCase {
             imageByteLength: snapshot.byteLength,
             imageSha256: snapshot.imageSha256,
             frozenTitle: source.title,
-            frozenDescription: source.description,
+            frozenDescription: source.nftDescription ?? source.description,
             seasonEndedAt: source.endedAt,
             eligibilityRows: source.eligibility,
             merkleRoot,
@@ -217,7 +246,7 @@ export class PrepareSeasonNftUseCase {
       return { releaseId: candidate.releaseId, status: 'BLOCKED' };
     return {
       releaseId: candidate.releaseId,
-      status: claims.length === 0 ? 'EMPTY' : 'FROZEN',
+      status: source.supply !== null || claims.length > 0 ? 'FROZEN' : 'EMPTY',
     };
   }
 

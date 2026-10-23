@@ -23,6 +23,7 @@ export type MeResult =
         id: string;
         displayName: string | null;
         avatarUrl: string | null;
+        createdAt: string;
         wallets: ReadonlyArray<
           Readonly<{ chainNamespace: string; address: string }>
         >;

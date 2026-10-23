@@ -135,6 +135,7 @@ async function alternateWalletSession(member) {
 }
 
 async function readyClaim(member) {
+  const creator = await actor();
   const seasonId = randomUUID();
   const releaseId = randomUUID();
   const claimId = randomUUID();
@@ -150,7 +151,7 @@ async function readyClaim(member) {
   await server.pool.query(
     `INSERT INTO seasons (canvas_id, creator_id, title, capacity)
      VALUES ($1, $2, 'Claim API season', 2)`,
-    [seasonId, member.userId],
+    [seasonId, creator.userId],
   );
   await server.pool.query(
     `INSERT INTO season_participants

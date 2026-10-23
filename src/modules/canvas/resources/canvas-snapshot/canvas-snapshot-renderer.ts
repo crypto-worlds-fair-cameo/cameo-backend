@@ -14,6 +14,34 @@ export const SNAPSHOT_RENDERER_VERSION = 'cameo-canvas-v1';
 const runFile = promisify(execFile);
 const MAX_RENDER_BYTES = 2 * 1024 ** 3;
 
+/** 모든 프로세스의 [pid, 부모 pid, 사용 메모리 bytes]를 읽는다. Windows에는 ps가 없어 CIM으로 같은 값을 읽는다. */
+async function processMemoryRows(): Promise<number[][]> {
+  const windows = process.platform === 'win32';
+  const { stdout } = windows
+    ? await runFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $_.WorkingSetSize }",
+        ],
+        { maxBuffer: 4 * 1024 ** 2, windowsHide: true },
+      )
+    : await runFile('ps', ['-axo', 'pid=,ppid=,rss='], {
+        maxBuffer: 4 * 1024 ** 2,
+      });
+  // ps의 rss는 KiB, WorkingSetSize는 bytes 단위다.
+  const unit = windows ? 1 : 1024;
+  return stdout
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => {
+      const [pid, parent, size] = line.trim().split(/\s+/).map(Number);
+      return [pid, parent, size * unit];
+    });
+}
+
 /** UI 없는 고정 브러시 번들을 격리된 Chromium에서 재생하고 제한된 산출물만 돌려준다. */
 @Injectable()
 export class CanvasSnapshotRenderer {
@@ -185,13 +213,7 @@ export class CanvasSnapshotRenderer {
 
   /** 브라우저 자식의 RSS와 Node 사용량을 합쳐 heap만으로 성공을 판단하지 않는다. */
   private async memoryBytes(root: number): Promise<number> {
-    const { stdout } = await runFile('ps', ['-axo', 'pid=,ppid=,rss='], {
-      maxBuffer: 4 * 1024 ** 2,
-    });
-    const rows = stdout
-      .trim()
-      .split('\n')
-      .map((line) => line.trim().split(/\s+/).map(Number));
+    const rows = await processMemoryRows();
     const ids = new Set([root]);
     for (let changed = true; changed;) {
       changed = false;
@@ -202,7 +224,7 @@ export class CanvasSnapshotRenderer {
         }
     }
     return rows.reduce(
-      (sum, [pid, , rss]) => sum + (ids.has(pid) ? rss * 1024 : 0),
+      (sum, [pid, , bytes]) => sum + (ids.has(pid) ? bytes : 0),
       process.memoryUsage().rss,
     );
   }

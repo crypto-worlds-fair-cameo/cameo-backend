@@ -224,6 +224,7 @@ function buildTransaction(
         merkleProof: [...source.merkleProof],
         minter: payer.publicKey,
       },
+      ...(source.claimGroup ? { group: source.claimGroup } : {}),
     });
     // 0 수수료도 명시해 Phantom이 budget 명령을 추가하며 원본 message를 바꾸지 않게 한다.
     builder = builder.prepend([limitItem, priorityItem]);
@@ -245,6 +246,7 @@ function buildTransaction(
       allowList: { merkleRoot: source.merkleRoot },
       mintLimit: { id: 0 },
     },
+    ...(source.claimGroup ? { group: source.claimGroup } : {}),
   });
   if (
     String(builder.items[0]?.instruction.keys[6]?.pubkey) !==
@@ -813,6 +815,7 @@ export class SeasonClaimReceiptLookup extends NftClaimReceiptLookup {
             allowList: { merkleRoot: source.merkleRoot },
             mintLimit: { id: 0 },
           },
+          ...(source.claimGroup ? { group: source.claimGroup } : {}),
         }).items[0]?.instruction.data;
         if (
           expectedData &&
