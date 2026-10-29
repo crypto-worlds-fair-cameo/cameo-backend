@@ -23,6 +23,7 @@ export type SeasonNftMintSeason = Readonly<{
   creatorWalletAddress: string | null;
   strokeCount: bigint;
   imageKey: string | null;
+  imageBytes: bigint | null;
   eligibility: readonly SeasonNftEligibilitySourceRow[];
   release: Readonly<{
     id: string;
@@ -101,8 +102,11 @@ export class SeasonNftMintQuery {
        FROM canvas_stroke_usages WHERE canvas_id = $1`,
       [seasonId],
     );
-    const snapshot = await executor.query<{ image_key: string }>(
-      `SELECT image_key
+    const snapshot = await executor.query<{
+      image_key: string;
+      image_bytes: string;
+    }>(
+      `SELECT image_key, image_bytes::text AS image_bytes
        FROM canvas_snapshots
        WHERE canvas_id = $1 AND status = 'READY' AND is_final = true
        ORDER BY created_at DESC, id DESC
@@ -140,7 +144,7 @@ export class SeasonNftMintQuery {
            FROM season_nft_transactions
            WHERE release_id = $1 AND state = 'PREPARED'
              AND kind IN ('SETUP_COLLECTION', 'SETUP_MACHINE', 'SETUP_GUARD',
-                          'SETUP_LOCK', 'SETUP_CREATOR_MINT')
+                          'SETUP_LOCK', 'SETUP_CREATOR_MINT', 'SETUP_STORAGE_FUND')
            ORDER BY created_at ASC, id ASC
            LIMIT 1`,
           [current.id],
@@ -161,6 +165,10 @@ export class SeasonNftMintQuery {
       creatorWalletAddress: row.creator_wallet,
       strokeCount: BigInt(strokes.rows[0]?.stroke_count ?? '0'),
       imageKey: snapshot.rows[0]?.image_key ?? null,
+      imageBytes:
+        snapshot.rows[0]?.image_bytes === undefined
+          ? null
+          : BigInt(snapshot.rows[0].image_bytes),
       eligibility: eligibility.rows.map((member) => ({
         userId: member.user_id,
         participantUserId: member.participant_user_id,
@@ -224,7 +232,7 @@ export class SeasonNftMintQuery {
        JOIN seasons s ON s.canvas_id = r.season_id
        WHERE t.id = $1 AND r.season_id = $2
          AND t.kind IN ('SETUP_COLLECTION', 'SETUP_MACHINE', 'SETUP_GUARD',
-                        'SETUP_LOCK', 'SETUP_CREATOR_MINT')`,
+                        'SETUP_LOCK', 'SETUP_CREATOR_MINT', 'SETUP_STORAGE_FUND')`,
       [input.transactionId, input.seasonId],
     );
     const row = result.rows[0];
