@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { publicKey, type PublicKey } from '@metaplex-foundation/umi';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +18,7 @@ import {
   buildAssetName,
   serializeSeasonMetadata,
 } from '../../resources/nft-media/season-nft-metadata';
+import { SeasonNftStorageFund } from '../../resources/nft-media/season-nft-storage-fund';
 import {
   TurboMediaPermanentError,
   TurboMediaPublisher,
@@ -103,6 +106,7 @@ export class PrepareSeasonNftUseCase {
     private readonly snapshots: FinalCanvasSnapshotReader,
     private readonly merkleArtifacts: SeasonNftMerkleArtifacts,
     @Optional() private readonly mediaPublisher?: TurboMediaPublisher,
+    @Optional() private readonly storageFund?: SeasonNftStorageFund,
   ) {}
 
   /** 정상 종료 시즌 하나를 idempotent release로 만들고 final snapshot이 있으면 한 번 동결한다. */
@@ -309,6 +313,21 @@ export class PrepareSeasonNftUseCase {
     }
     const imageByteLength = source.imageByteLength;
     const imageSha256 = source.imageSha256;
+    if (this.usesLocalMedia(source)) {
+      return this.publishDevnetImage(
+        source,
+        `${this.localMediaBase(source)}/image.png`,
+      );
+    }
+    if (
+      !(await this.creatorUploadReady(
+        source,
+        snapshot.pngBytes.length,
+        io.signal,
+      ))
+    ) {
+      return { releaseId: source.releaseId, status: 'RETRY' };
+    }
 
     try {
       const published = await this.mediaPublisher.publish(
@@ -386,6 +405,36 @@ export class PrepareSeasonNftUseCase {
       }),
     );
     const metadataSha256 = createHash('sha256').update(bytes).digest('hex');
+    if (this.usesLocalMedia(source)) {
+      const metadataUri = `${this.localMediaBase(source)}/metadata.json`;
+      await mkdir(path.dirname(this.localMetadataPath(source)), {
+        recursive: true,
+      });
+      await writeFile(this.localMetadataPath(source), bytes);
+      const advanced = await withDbOnlyRetry(() =>
+        this.transactions.run((transaction) =>
+          this.releases.advanceStage(
+            {
+              releaseId: source.releaseId,
+              expectedVersion: source.version,
+              expectedStage: 'IMAGE',
+              nextStage: 'METADATA',
+              assetName: buildAssetName(frozenTitle),
+              metadataSha256,
+              metadataUri,
+            },
+            transaction,
+          ),
+        ),
+      );
+      return {
+        releaseId: source.releaseId,
+        status: advanced.updated ? 'METADATA' : 'RETRY',
+      };
+    }
+    if (!(await this.creatorUploadReady(source, bytes.length, io.signal))) {
+      return { releaseId: source.releaseId, status: 'RETRY' };
+    }
     try {
       const published = await this.mediaPublisher.publish(
         {
@@ -425,6 +474,121 @@ export class PrepareSeasonNftUseCase {
         error.message,
       );
     }
+  }
+
+  /**
+   * 연습망(devnet)은 파일 저장 회사가 결제를 확인하지 않으므로, 이 서버가 스냅샷 파일을 공개 주소로
+   * 내보내고 있으면 그 주소를 NFT 그림·메타데이터 주소로 쓴다. 설정이 없으면 기존처럼 Turbo에 올린다.
+   */
+  private usesLocalMedia(
+    source: NonNullable<
+      Awaited<ReturnType<SeasonNftRepository['findMediaSource']>>
+    >,
+  ): boolean {
+    return (
+      source.network === 'devnet' &&
+      source.snapshotId !== null &&
+      Boolean(
+        this.config.get('canvasSnapshot.publicBaseUrl', { infer: true }),
+      ) &&
+      Boolean(this.config.get('canvasSnapshot.storageRoot', { infer: true }))
+    );
+  }
+
+  private localMediaBase(
+    source: NonNullable<
+      Awaited<ReturnType<SeasonNftRepository['findMediaSource']>>
+    >,
+  ): string {
+    const base = this.config.get('canvasSnapshot.publicBaseUrl', {
+      infer: true,
+    });
+    if (!base || source.snapshotId === null) {
+      throw new Error('Season NFT local media address is unavailable.');
+    }
+    return `${base.replace(/\/+$/, '')}/snapshots/seasons/${source.seasonId.toLowerCase()}/${source.snapshotId.toLowerCase()}`;
+  }
+
+  private localMetadataPath(
+    source: NonNullable<
+      Awaited<ReturnType<SeasonNftRepository['findMediaSource']>>
+    >,
+  ): string {
+    const root = this.config.get('canvasSnapshot.storageRoot', {
+      infer: true,
+    });
+    if (!root || source.snapshotId === null) {
+      throw new Error('Season NFT local media path is unavailable.');
+    }
+    return path.join(
+      root,
+      'snapshots',
+      'seasons',
+      source.seasonId.toLowerCase(),
+      source.snapshotId.toLowerCase(),
+      'metadata.json',
+    );
+  }
+
+  private async publishDevnetImage(
+    source: NonNullable<
+      Awaited<ReturnType<SeasonNftRepository['findMediaSource']>>
+    >,
+    imageUri: string,
+  ): Promise<PrepareSeasonNftMediaResult> {
+    if (source.imageByteLength === null || source.imageSha256 === null) {
+      return this.blockMedia(
+        source.releaseId,
+        source.version,
+        SeasonNftInternalErrorCodes.FinalSnapshotInvalid,
+        'Frozen canvas snapshot identity changed before media publication.',
+      );
+    }
+    const advanced = await withDbOnlyRetry(() =>
+      this.transactions.run((transaction) =>
+        this.releases.advanceStage(
+          {
+            releaseId: source.releaseId,
+            expectedVersion: source.version,
+            expectedStage: 'FROZEN',
+            nextStage: 'IMAGE',
+            imageByteLength: source.imageByteLength ?? undefined,
+            imageSha256: source.imageSha256 ?? undefined,
+            imageUri,
+          },
+          transaction,
+        ),
+      ),
+    );
+    return {
+      releaseId: source.releaseId,
+      status: advanced.updated ? 'IMAGE' : 'RETRY',
+    };
+  }
+
+  /** 개설자 지갑이 파일 비용을 내기 전에는 업로드하지 않는다. 연습망은 개설자 결제가 불가능해 서비스 지갑이 낸다. */
+  private async creatorUploadReady(
+    source: NonNullable<
+      Awaited<ReturnType<SeasonNftRepository['findMediaSource']>>
+    >,
+    byteCount: number,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (
+      !source.creatorWalletAddress ||
+      !this.storageFund ||
+      source.network === 'devnet'
+    ) {
+      return true;
+    }
+    return this.storageFund.ensure({
+      releaseId: source.releaseId,
+      network: source.network,
+      creatorWalletAddress: source.creatorWalletAddress,
+      uploadBytes: byteCount,
+      quoteBytes: byteCount,
+      signal,
+    });
   }
 
   /** deterministic media 오류만 release에 기록하며 CAS 패배는 다음 worker 재조회로 넘긴다. */

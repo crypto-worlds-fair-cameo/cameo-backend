@@ -42,6 +42,7 @@ export type SeasonNftTransactionKind =
   | 'SETUP_GUARD'
   | 'SETUP_LOCK'
   | 'SETUP_CREATOR_MINT'
+  | 'SETUP_STORAGE_FUND'
   | 'USER_PROOF'
   | 'USER_MINT';
 

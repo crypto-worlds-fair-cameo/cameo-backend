@@ -243,6 +243,7 @@ export class RequestSeasonNftMintController {
     SeasonNftErrorCodes.NftWalletMismatch,
     SeasonNftErrorCodes.NftTransactionInvalid,
     SeasonNftErrorCodes.NftTransactionInvalidState,
+    SeasonNftErrorCodes.NftTransactionExpired,
     SeasonNftErrorCodes.NftServiceUnavailable,
   ])
   submit(

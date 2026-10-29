@@ -126,14 +126,16 @@ export async function buildMachineAndGuard(
     }>;
   }>,
 ): Promise<TransactionBuilder> {
+  const creator = input.creator;
+  const payer = creator ? createNoopSigner(creator.wallet) : input.service;
   // createCandyMachine normally fetches rent internally; inject the separately scheduled quote.
+  // Its account-creation step ignores the payer argument and charges context.payer.
   const context = Object.assign(Object.create(input.umi), input.umi, {
+    payer,
     rpc: Object.assign(Object.create(input.umi.rpc), input.umi.rpc, {
       getRent: async () => lamports(input.rentLamports),
     }),
   }) as Umi;
-  const creator = input.creator;
-  const payer = creator ? createNoopSigner(creator.wallet) : input.service;
   const groups = creator
     ? [
         ...(creator.merkleRoot
@@ -189,21 +191,23 @@ export function buildCollectionAuthorityLock(
   input: Readonly<{
     umi: Umi;
     authority: Signer;
+    payer?: Signer;
     collection: PublicKey;
     lockAuthority: PublicKey;
   }>,
 ): TransactionBuilder {
+  const payer = input.payer ?? input.authority;
   return core
     .removeCollectionPlugin(input.umi, {
       collection: input.collection,
-      payer: input.authority,
+      payer,
       authority: input.authority,
       plugin: { type: 'ImmutableMetadata' },
     })
     .add(
       core.updateCollectionV1(input.umi, {
         collection: input.collection,
-        payer: input.authority,
+        payer,
         authority: input.authority,
         newUpdateAuthority: input.lockAuthority,
         newName: none(),
@@ -309,8 +313,10 @@ export function buildCreatorGuardLock(
     .updateCandyGuard(input.umi, {
       candyGuard: input.candyGuard,
       authority: input.authority,
+      payer: input.payer,
+      // Default guards merge into every group, so a default start date would also block the claim group.
       guards: {
-        startDate: { date: dateTime(CLAIM_BLOCK_START_DATE) },
+        startDate: null,
       },
       groups,
     })
@@ -436,7 +442,7 @@ export class SolanaJsonRpcTransport extends SeasonNftRpcTransport {
   > {
     const result = await this.call<{
       value: { blockhash: string; lastValidBlockHeight: number };
-    }>('getLatestBlockhash', [{ commitment: 'finalized' }], signal);
+    }>('getLatestBlockhash', [{ commitment: 'confirmed' }], signal);
     return {
       blockhash: result.value.blockhash,
       lastValidBlockHeight: BigInt(result.value.lastValidBlockHeight),
@@ -1140,7 +1146,11 @@ function creatorClaimsReady(
   if (!machine || !guard || !collection) return false;
   const claim = guard.groups.find((group) => group.label === 'claim');
   const claimsOpen = source.merkleRoot
-    ? Boolean(claim && isNone(claim.guards.startDate))
+    ? Boolean(
+        claim &&
+        isNone(claim.guards.startDate) &&
+        isNone(guard.guards.startDate),
+      )
     : !claim;
   return (
     claimsOpen &&
@@ -1355,7 +1365,10 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     if (!['METADATA', 'COLLECTION', 'MACHINE'].includes(identity.source.stage))
       return null;
     const checkpoint = this.checkpoints.get(releaseId);
-    if (!checkpoint || Date.now() - checkpoint.fetchedAt > 30_000) {
+    // 블록해시·임대료·계정 조회는 15초 간격의 서로 다른 실행으로 나뉜다. 기준이 짧으면(예: 20초)
+    // 계정 조회에 닿기 전에 다시 처음으로 돌아가 progress에 도달하지 못하므로 45초로 둔다.
+    // 개설자가 지갑 팝업에서 서명할 거래의 블록해시는 아래 계정 조회 직전에 따로 새로 받는다.
+    if (!checkpoint || Date.now() - checkpoint.fetchedAt > 45_000) {
       return {
         kind: 'RELEASE_PREPARE',
         rpcType: 'READ',
@@ -1387,6 +1400,12 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       kind: 'RELEASE_PREPARE',
       rpcType: 'READ',
       run: async (signal) => {
+        let current = this.checkpoints.get(releaseId) ?? checkpoint;
+        if (creatorPaid(identity.source)) {
+          const latest = await this.transport.getLatestBlockhash(signal);
+          current = { ...current, ...latest, fetchedAt: Date.now() };
+          this.checkpoints.set(releaseId, current);
+        }
         const response = await this.transport.getAccounts(
           [
             identity.source.collectionAddress!,
@@ -1396,7 +1415,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
           signal,
         );
         const accounts = decodeReleaseAccounts(identity.umi, response);
-        await this.progress(identity, accounts, checkpoint);
+        await this.progress(identity, accounts, current);
       },
     };
   }
@@ -1748,6 +1767,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
           umi,
           collection: identity.collection.publicKey,
           authority: service,
+          ...(creatorPayer ? { payer: creatorPayer } : {}),
           lockAuthority: identity.lock,
         }).setFeePayer(creatorPayer ?? service),
         checkpoint,
@@ -1866,7 +1886,11 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     }
     if (existing && !['FAILED', 'EXPIRED'].includes(existing.state)) return;
     const ready = creatorSigns
-      ? withCreatorBudget(builder).setVersion('legacy')
+      ? withCreatorBudget(builder)
+          .setFeePayer(
+            createNoopSigner(publicKey(identity.source.creatorWalletAddress!)),
+          )
+          .setVersion('legacy')
       : builder;
     const transaction = await ready
       .setBlockhash({
@@ -2100,7 +2124,7 @@ export class SolanaNftChainRpc extends NftChainRpc {
     });
   };
 
-  override inspectAccountEffects = (
+  override inspectAccountEffects = async (
     transactions: readonly DispatchableNftTransaction[],
     signal: AbortSignal,
   ): Promise<
@@ -2109,11 +2133,40 @@ export class SolanaNftChainRpc extends NftChainRpc {
       'transactionId' | 'accountEvidence' | 'reconciliationEvidence'
     >[]
   > => {
-    if (transactions.every(({ kind }) => kind?.startsWith('SETUP_')))
-      return this.releaseChain.inspectEffects(transactions, signal);
-    if (transactions.every(({ kind }) => kind?.startsWith('USER_')))
-      return this.claimEffects.inspect(transactions, signal);
-    throw new Error('NFT account effect batch mixes setup and user work.');
+    const isStorageFund = (transaction: DispatchableNftTransaction) =>
+      transaction.operationKey?.startsWith('setup:storage-fund:') === true;
+    const rest = transactions.filter(
+      (transaction) => !isStorageFund(transaction),
+    );
+    const fundResults = transactions.filter(isStorageFund).map(({ id }) => ({
+      transactionId: id,
+      accountEvidence: 'ABSENT' as const,
+    }));
+    const restResults =
+      rest.length === 0
+        ? []
+        : rest.every(({ kind }) => kind?.startsWith('SETUP_'))
+          ? await this.releaseChain.inspectEffects(rest, signal)
+          : rest.every(({ kind }) => kind?.startsWith('USER_'))
+            ? await this.claimEffects.inspect(rest, signal)
+            : (() => {
+                throw new Error(
+                  'NFT account effect batch mixes setup and user work.',
+                );
+              })();
+    const byId = new Map(
+      [...fundResults, ...restResults].map((result) => [
+        result.transactionId,
+        result,
+      ]),
+    );
+    return transactions.map((transaction) => {
+      const result = byId.get(transaction.id);
+      if (!result) {
+        throw new Error('NFT account effect inspection missed a transaction.');
+      }
+      return result;
+    });
   };
 
   override getFinalizedBlockHeight = (signal: AbortSignal): Promise<bigint> => {

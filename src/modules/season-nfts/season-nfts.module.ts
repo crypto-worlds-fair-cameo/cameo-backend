@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { ClaimRepository } from './resources/claim/claim.repository';
 import { NftUploadRepository } from './resources/nft-media/nft-upload.repository';
+import { SeasonNftStorageFund } from './resources/nft-media/season-nft-storage-fund';
 import {
   NFT_MEDIA_GATEWAY_FETCH,
   TurboMediaPublisher,
@@ -112,6 +113,7 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
     { provide: TurboMediaTransport, useExisting: TurboSdkMediaTransport },
     { provide: NFT_MEDIA_GATEWAY_FETCH, useValue: globalThis.fetch },
     TurboMediaPublisher,
+    SeasonNftStorageFund,
     SeasonNftCandidatesQuery,
     {
       provide: SEASON_NFT_MERKLE_PASS,

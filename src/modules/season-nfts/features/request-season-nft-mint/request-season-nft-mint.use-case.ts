@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   createNoopSigner,
@@ -22,6 +22,7 @@ import { TransactionRunner } from '../../../../database/transaction/transaction-
 import { assertAuthOrigin } from '../../../auth/resources/auth-origin/auth-origin';
 import { SessionAuthenticator } from '../../../auth/resources/session/session-authenticator';
 import { CanvasSnapshotFiles } from '../../../canvas/resources/canvas-snapshot/canvas-snapshot-files';
+import { SeasonNftStorageFund } from '../../resources/nft-media/season-nft-storage-fund';
 import type { SeasonNftNetwork } from '../../resources/season-nft/season-nft';
 import { SeasonNftInternalErrorCodes } from '../../resources/season-nft/season-nft.error-codes';
 import { SeasonNftRepository } from '../../resources/season-nft/season-nft.repository';
@@ -88,6 +89,8 @@ function accountSpaces(builder: TransactionBuilder): number[] {
 /** 개설자가 고른 수량으로 시즌 NFT 발행을 시작하고, 체인 거래 서명을 접수한다. */
 @Injectable()
 export class RequestSeasonNftMintUseCase {
+  private quoteCache?: Readonly<{ key: string; at: number; value: string }>;
+
   constructor(
     private readonly config: ConfigService<AllConfigType>,
     private readonly authenticator: SessionAuthenticator,
@@ -97,6 +100,7 @@ export class RequestSeasonNftMintUseCase {
     private readonly nftTransactions: NftTransactionRepository,
     private readonly transport: SeasonNftRpcTransport,
     private readonly snapshots: CanvasSnapshotFiles,
+    @Optional() private readonly storageFund?: SeasonNftStorageFund,
   ) {}
 
   async preview(
@@ -137,6 +141,7 @@ export class RequestSeasonNftMintUseCase {
       this.assertCanMint(locked, actor.userId, actor.walletAddress);
       const supply = this.supplyFor(locked!, supplyText);
       const release = locked!.release;
+      const frozen = release != null && release.eligibleCount !== null;
       if (!release) {
         await this.releases.insertMintRequest(
           {
@@ -150,7 +155,7 @@ export class RequestSeasonNftMintUseCase {
         );
       } else if (
         release.supply !== supply ||
-        release.nftDescription !== nftDescription
+        (release.nftDescription !== nftDescription && !frozen)
       ) {
         const revised = await this.releases.reviseMintRequest(
           {
@@ -207,6 +212,9 @@ export class RequestSeasonNftMintUseCase {
       });
     } catch {
       throw new BusinessError(ErrorCodes.NftTransactionInvalid);
+    }
+    if (owned.state === 'EXPIRED' || owned.state === 'FAILED') {
+      throw new BusinessError(ErrorCodes.NftTransactionExpired);
     }
     const accepted = await this.transactions.run((transaction) =>
       this.nftTransactions.acceptSigned(
@@ -322,11 +330,15 @@ export class RequestSeasonNftMintUseCase {
         ? supply - BigInt(Math.max(eligibleCount, 1)) + 1n
         : 1n;
     const imageUrl = this.imageUrl(source.imageKey);
+    // 연습망(devnet)은 그림을 이 서버 주소로 쓰므로 파일 저장 비용 거래가 없다.
+    const paysStorage = actor.network !== 'devnet';
     const estimatedLamports =
-      source.release === null &&
-      eligibleCount > 0 &&
-      allocation <= BigInt(MAX_CREATOR_ALLOCATION)
-        ? await this.estimate(Number(allocation))
+      eligibleCount > 0 && allocation <= BigInt(MAX_CREATOR_ALLOCATION)
+        ? await this.estimate(
+            Number(allocation),
+            paysStorage ? source.imageBytes : null,
+            paysStorage,
+          )
         : null;
     const pending = source.pendingTransaction;
     return {
@@ -346,7 +358,10 @@ export class RequestSeasonNftMintUseCase {
       estimatedLamports,
       walletAddress: source.creatorWalletAddress ?? actor.walletAddress,
       mintedCount: (source.release?.creatorMintedCount ?? 0n).toString(),
-      signatureCount: Number(allocation) + Number(SETUP_TRANSACTION_COUNT),
+      signatureCount:
+        Number(allocation) +
+        Number(SETUP_TRANSACTION_COUNT) +
+        (paysStorage ? 1 : 0),
       collectionAddress:
         source.release?.state === 'READY'
           ? source.release.collectionAddress
@@ -373,7 +388,28 @@ export class RequestSeasonNftMintUseCase {
   }
 
   /** 컬렉션, 기계, 개설자 NFT 임대료와 거래 수수료를 더해 예상 비용을 만든다. */
-  private async estimate(allocation: number): Promise<string | null> {
+  private async estimate(
+    allocation: number,
+    imageBytes: bigint | null,
+    paysStorage: boolean,
+  ): Promise<string | null> {
+    const key = `${allocation}:${imageBytes ?? ''}:${paysStorage}`;
+    if (
+      this.quoteCache?.key === key &&
+      Date.now() - this.quoteCache.at < 60_000
+    ) {
+      return this.quoteCache.value;
+    }
+    const value = await this.quote(allocation, imageBytes, paysStorage);
+    if (value !== null) this.quoteCache = { key, at: Date.now(), value };
+    return value;
+  }
+
+  private async quote(
+    allocation: number,
+    imageBytes: bigint | null,
+    paysStorage: boolean,
+  ): Promise<string | null> {
     try {
       const umi = createUmi('http://127.0.0.1')
         .use(core.mplCore())
@@ -447,7 +483,21 @@ export class RequestSeasonNftMintUseCase {
       );
       total += mintRent * BigInt(allocation);
       total +=
-        FEE_BUFFER_LAMPORTS * (BigInt(allocation) + SETUP_TRANSACTION_COUNT);
+        FEE_BUFFER_LAMPORTS *
+        (BigInt(allocation) +
+          SETUP_TRANSACTION_COUNT +
+          (paysStorage ? 1n : 0n));
+      if (
+        imageBytes !== null &&
+        imageBytes > 0n &&
+        imageBytes <= BigInt(Number.MAX_SAFE_INTEGER) &&
+        this.storageFund
+      ) {
+        const storage = await this.storageFund.quoteLamports(
+          Number(imageBytes),
+        );
+        if (storage !== null) total += storage;
+      }
       return total.toString();
     } catch {
       return null;

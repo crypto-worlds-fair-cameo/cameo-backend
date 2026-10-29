@@ -549,10 +549,19 @@ export class NftRuntimeQueue extends NftWorkerQueue {
       });
       return;
     }
+    const errorMessage =
+      error instanceof Error ? error.message : 'Season NFT preparation failed.';
+    this.logger.warn({
+      event: 'season_nft.release_retry',
+      releaseId: release.releaseId,
+      errorCode: error instanceof Error ? error.name : 'NFT_CHAIN_RETRY',
+      errorMessage: errorMessage.slice(0, 300),
+    });
     await this.releases.rescheduleDue({
       releaseId: release.releaseId,
       retryDelayMs: nextRetryDelayMs(release.retryCount, retryAfter(error)),
       errorCode: error instanceof Error ? error.name : 'NFT_CHAIN_RETRY',
+      errorMessage,
     });
   }
 

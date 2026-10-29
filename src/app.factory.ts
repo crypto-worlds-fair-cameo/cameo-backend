@@ -133,7 +133,7 @@ export function configureApp(app: INestApplication): INestApplication {
       (req, res, next) => {
         const uuid = '[0-9a-f-]{36}';
         const allowed = new RegExp(
-          `^/(main|seasons)/${uuid}/${uuid}/(image\\.png|continuation\\.json)$`,
+          `^/(main|seasons)/${uuid}/${uuid}/(image\\.png|continuation\\.json|metadata\\.json)$`,
         );
         if (!allowed.test(req.path)) {
           res.sendStatus(404);

@@ -112,9 +112,11 @@ export type AdvanceSeasonNftStageInput = Readonly<{
 export type SeasonNftMediaSource = Readonly<{
   releaseId: string;
   seasonId: string;
+  network: SeasonNftNetwork;
   state: SeasonNftReleaseRecord['state'];
   stage: SeasonNftReleaseStage;
   version: bigint;
+  creatorWalletAddress: string | null;
   snapshotId: string | null;
   throughSequence: bigint | null;
   eligibleCount: number | null;
@@ -333,6 +335,7 @@ export class SeasonNftRepository {
       releaseId: string;
       retryDelayMs: number;
       errorCode: string;
+      errorMessage?: string;
     }>,
   ): Promise<void> {
     await withDbOnlyRetry(() =>
@@ -348,9 +351,17 @@ export class SeasonNftRepository {
            SET retry_count = retry_count + 1,
                next_attempt_at = statement_timestamp() +
                  ($2::double precision * interval '1 millisecond'),
-               last_error_code = $3, updated_at = CURRENT_TIMESTAMP
+               last_error_code = $3,
+               last_error_message = $5,
+               updated_at = CURRENT_TIMESTAMP
            WHERE id = $1 AND state = $4`,
-          [input.releaseId, input.retryDelayMs, input.errorCode, release.state],
+          [
+            input.releaseId,
+            input.retryDelayMs,
+            input.errorCode,
+            release.state,
+            input.errorMessage?.slice(0, 500) ?? null,
+          ],
         );
       }),
     );
@@ -370,9 +381,11 @@ export class SeasonNftRepository {
     return {
       releaseId: row.id,
       seasonId: row.season_id,
+      network: row.network,
       state: row.state,
       stage: row.stage,
       version: BigInt(row.version),
+      creatorWalletAddress: row.creator_wallet_address,
       snapshotId: row.snapshot_id,
       throughSequence:
         row.through_sequence === null ? null : BigInt(row.through_sequence),
