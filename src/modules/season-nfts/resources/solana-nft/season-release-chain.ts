@@ -330,6 +330,61 @@ export function buildCreatorGuardLock(
     .setFeePayer(input.payer);
 }
 
+/** 발행 장치, 컬렉션, 가드 잠금을 확인 한 번으로 묶는다. */
+export function buildReleaseLock(
+  input: Readonly<{
+    umi: Umi;
+    authority: Signer;
+    payer: Signer;
+    collection: PublicKey;
+    candyMachine: PublicKey;
+    candyGuard: PublicKey | Pda;
+    lockAuthority: PublicKey;
+    creator: Readonly<{
+      wallet: PublicKey;
+      allocation: number;
+      merkleRoot: Uint8Array | null;
+    }> | null;
+    merkleRoot: Uint8Array;
+  }>,
+): TransactionBuilder {
+  const guard = input.creator
+    ? buildCreatorGuardLock({
+        umi: input.umi,
+        authority: input.authority,
+        payer: input.payer,
+        candyGuard: input.candyGuard,
+        lockAuthority: input.lockAuthority,
+        creator: input.creator.wallet,
+        allocation: input.creator.allocation,
+        merkleRoot: input.creator.merkleRoot,
+      })
+    : buildFinalGuardLock({
+        umi: input.umi,
+        authority: input.authority,
+        candyGuard: input.candyGuard,
+        lockAuthority: input.lockAuthority,
+        merkleRoot: input.merkleRoot,
+      }).setFeePayer(input.payer);
+  return candy
+    .setCandyMachineAuthority(input.umi, {
+      candyMachine: input.candyMachine,
+      authority: input.authority,
+      newAuthority: input.lockAuthority,
+    })
+    .add(
+      buildCollectionAuthorityLock({
+        umi: input.umi,
+        authority: input.authority,
+        payer: input.payer,
+        collection: input.collection,
+        lockAuthority: input.lockAuthority,
+      }),
+    )
+    .add(guard)
+    .setFeePayer(input.payer);
+}
+
 function creatorPaid(source: SeasonNftChainSource): boolean {
   return source.supply != null && source.creatorWalletAddress != null;
 }
@@ -1742,7 +1797,44 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     const machine = accounts.machine!;
     const collection = accounts.collection!;
     const guard = accounts.guard!;
-    if (String(machine.authority) === String(service.publicKey)) {
+    const machineOpen = String(machine.authority) === String(service.publicKey);
+    const collectionOpen =
+      String(collection.updateAuthority) === String(service.publicKey);
+    const guardOpen =
+      String(guard.authority) === String(service.publicKey) &&
+      (creatorPaid(source) || isSome(guard.guards.startDate));
+    if (
+      machineOpen &&
+      collectionOpen &&
+      guardOpen &&
+      (creatorPaid(source) || source.merkleRoot)
+    ) {
+      await this.prepareOperation(
+        identity,
+        setupOperationKey('lock', 0),
+        'SETUP_LOCK',
+        buildReleaseLock({
+          umi,
+          authority: service,
+          payer: creatorPayer ?? service,
+          collection: identity.collection.publicKey,
+          candyMachine: identity.machine.publicKey,
+          candyGuard: identity.guard,
+          lockAuthority: identity.lock,
+          creator: creatorPaid(source)
+            ? {
+                wallet: publicKey(source.creatorWalletAddress!),
+                allocation: creatorAllocationOf(source),
+                merkleRoot: source.merkleRoot,
+              }
+            : null,
+          merkleRoot: source.merkleRoot ?? new Uint8Array(32),
+        }),
+        checkpoint,
+      );
+      return;
+    }
+    if (machineOpen) {
       await this.prepareOperation(
         identity,
         setupOperationKey('lock', 0),

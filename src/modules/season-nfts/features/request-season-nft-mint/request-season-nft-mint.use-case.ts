@@ -36,7 +36,8 @@ import {
 } from './season-nft-mint.query';
 
 const MAX_SUPPLY = BigInt(Number.MAX_SAFE_INTEGER);
-const SETUP_TRANSACTION_COUNT = 5n;
+/** 컬렉션, 발행 장치, 잠금. 잠금 3종은 확인 한 번에 서명한다. */
+const SETUP_TRANSACTION_COUNT = 3n;
 const FEE_BUFFER_LAMPORTS = 15_000n;
 // Core SDK는 컬렉션과 에셋 계정 크기를 bytesCreatedOnChain에 넣지 않는다.
 const COLLECTION_ACCOUNT_SPACE = 600;
