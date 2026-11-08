@@ -142,6 +142,9 @@ class SeasonNftMintResponse {
 
   @ApiProperty({ type: PendingMintTransactionResponse, nullable: true })
   pendingTransaction!: PendingMintTransactionResponse | null;
+
+  @ApiProperty({ type: [PendingMintTransactionResponse] })
+  pendingTransactions!: PendingMintTransactionResponse[];
 }
 
 class SubmitMintTransactionResponse {

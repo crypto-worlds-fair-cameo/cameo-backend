@@ -211,6 +211,20 @@ export class NftTransactionRepository extends NftDispatchRepository {
     return result.rows[0] ? this.dispatchable(result.rows[0]) : null;
   }
 
+  /** 아직 끝나지 않은 개설자 NFT 거래의 operation key. 같은 키의 만료된 예전 행은 빼는다. */
+  async listInFlightCreatorMints(
+    input: Readonly<{ network: SeasonNftNetwork; releaseId: string }>,
+  ): Promise<readonly string[]> {
+    const result = await this.pool.query<{ operation_key: string }>(
+      `SELECT operation_key
+       FROM season_nft_transactions
+       WHERE network = $1 AND release_id = $2 AND kind = 'SETUP_CREATOR_MINT'
+         AND state IN ('PREPARED', 'SIGNED', 'SUBMITTED', 'CONFIRMED')`,
+      [input.network, input.releaseId],
+    );
+    return result.rows.map((row) => row.operation_key);
+  }
+
   /** actor·season·attempt가 모두 맞는 사용자 거래만 검증용 bytes와 함께 반환한다. */
   async findOwnedClaimTransaction(
     input: Readonly<{

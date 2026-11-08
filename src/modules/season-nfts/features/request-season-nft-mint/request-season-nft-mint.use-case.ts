@@ -26,6 +26,11 @@ import { SeasonNftStorageFund } from '../../resources/nft-media/season-nft-stora
 import type { SeasonNftNetwork } from '../../resources/season-nft/season-nft';
 import { SeasonNftInternalErrorCodes } from '../../resources/season-nft/season-nft.error-codes';
 import { SeasonNftRepository } from '../../resources/season-nft/season-nft.repository';
+import { CreatorSignaturePresence } from '../../resources/solana-nft/creator-signature-presence';
+import {
+  CREATOR_AWAITING_SIGNATURE,
+  creatorWalletApprovalCount,
+} from '../../resources/solana-nft/creator-signature-wait';
 import { NftTransactionRepository } from '../../resources/solana-nft/nft-transaction.repository';
 import { SeasonNftRpcTransport } from '../../resources/solana-nft/season-release-chain';
 import { validateSignedClaimTransaction } from '../../resources/solana-nft/signed-transaction-validator';
@@ -68,6 +73,11 @@ export type SeasonNftMintView = Readonly<{
     serializedTransactionBase64: string;
     purpose: 'SETUP' | 'CREATOR_MINT';
   }> | null;
+  pendingTransactions: readonly Readonly<{
+    transactionId: string;
+    serializedTransactionBase64: string;
+    purpose: 'SETUP' | 'CREATOR_MINT';
+  }>[];
 }>;
 
 function parseSupply(value: string): bigint {
@@ -101,6 +111,7 @@ export class RequestSeasonNftMintUseCase {
     private readonly nftTransactions: NftTransactionRepository,
     private readonly transport: SeasonNftRpcTransport,
     private readonly snapshots: CanvasSnapshotFiles,
+    private readonly presence: CreatorSignaturePresence,
     @Optional() private readonly storageFund?: SeasonNftStorageFund,
   ) {}
 
@@ -319,6 +330,14 @@ export class RequestSeasonNftMintUseCase {
     if (source.creatorId !== actor.userId) {
       throw new BusinessError(ErrorCodes.NftMintNotCreator);
     }
+    if (source.release) {
+      this.presence.mark(source.release.id);
+      if (source.release.lastErrorCode === CREATOR_AWAITING_SIGNATURE) {
+        await this.releases.resumeCreatorSignature({
+          releaseId: source.release.id,
+        });
+      }
+    }
     const eligibleCount = source.eligibility.length;
     const stored = source.release?.supply ?? null;
     const supply =
@@ -341,7 +360,15 @@ export class RequestSeasonNftMintUseCase {
             paysStorage,
           )
         : null;
-    const pending = source.pendingTransaction;
+    const pending = source.pendingTransactions.map((item) => ({
+      transactionId: item.id,
+      serializedTransactionBase64:
+        item.serializedTransaction.toString('base64'),
+      purpose:
+        item.kind === 'SETUP_CREATOR_MINT'
+          ? ('CREATOR_MINT' as const)
+          : ('SETUP' as const),
+    }));
     return {
       seasonId: source.seasonId,
       status: source.release?.state ?? 'NONE',
@@ -359,23 +386,17 @@ export class RequestSeasonNftMintUseCase {
       estimatedLamports,
       walletAddress: source.creatorWalletAddress ?? actor.walletAddress,
       mintedCount: (source.release?.creatorMintedCount ?? 0n).toString(),
-      signatureCount:
-        Number(allocation) +
-        Number(SETUP_TRANSACTION_COUNT) +
-        (paysStorage ? 1 : 0),
+      signatureCount: creatorWalletApprovalCount({
+        allocation: Number(allocation),
+        setupCount: Number(SETUP_TRANSACTION_COUNT),
+        paysStorage,
+      }),
       collectionAddress:
         source.release?.state === 'READY'
           ? source.release.collectionAddress
           : null,
-      pendingTransaction: pending
-        ? {
-            transactionId: pending.id,
-            serializedTransactionBase64:
-              pending.serializedTransaction.toString('base64'),
-            purpose:
-              pending.kind === 'SETUP_CREATOR_MINT' ? 'CREATOR_MINT' : 'SETUP',
-          }
-        : null,
+      pendingTransaction: pending[0] ?? null,
+      pendingTransactions: pending,
     };
   }
 

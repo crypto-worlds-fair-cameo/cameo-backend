@@ -40,6 +40,7 @@ import {
   SEASON_NFT_MERKLE_PASS,
   SeasonNftMerkleArtifacts,
 } from './features/prepare-season-nft/season-nft-merkle-artifacts';
+import { CreatorSignaturePresence } from './resources/solana-nft/creator-signature-presence';
 import { PreparationKeyStore } from './resources/solana-nft/preparation-key-store';
 import {
   SEASON_NFT_RPC_FETCH,
@@ -123,6 +124,7 @@ import { ReconcileNftTransactionsUseCase } from './features/reconcile-nft-transa
     PrepareSeasonNftUseCase,
     NftWorkerConfig,
     PreparationKeyStore,
+    CreatorSignaturePresence,
     SeasonNftUmiFactory,
     SeasonReleaseChain,
     {

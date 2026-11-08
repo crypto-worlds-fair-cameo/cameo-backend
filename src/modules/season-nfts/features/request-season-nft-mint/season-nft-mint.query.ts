@@ -9,6 +9,7 @@ import type {
   SeasonNftTransactionKind,
 } from '../../resources/season-nft/season-nft';
 import { CREATOR_MINT_ELIGIBILITY_SQL } from '../../resources/season-nft/season-nft-eligibility';
+import { CREATOR_MINT_BATCH_SIZE } from '../../resources/solana-nft/creator-signature-wait';
 import type { SeasonNftEligibilitySourceRow } from '../prepare-season-nft/season-nft-candidates.query';
 
 export type SeasonNftMintSeason = Readonly<{
@@ -37,11 +38,11 @@ export type SeasonNftMintSeason = Readonly<{
     lastErrorCode: string | null;
     collectionAddress: string | null;
   }> | null;
-  pendingTransaction: Readonly<{
+  pendingTransactions: readonly Readonly<{
     id: string;
     kind: SeasonNftTransactionKind;
     serializedTransaction: Buffer;
-  }> | null;
+  }>[];
 }>;
 
 type EligibilityRow = {
@@ -146,11 +147,19 @@ export class SeasonNftMintQuery {
              AND kind IN ('SETUP_COLLECTION', 'SETUP_MACHINE', 'SETUP_GUARD',
                           'SETUP_LOCK', 'SETUP_CREATOR_MINT', 'SETUP_STORAGE_FUND')
            ORDER BY created_at ASC, id ASC
-           LIMIT 1`,
+           LIMIT 32`,
           [current.id],
         )
       : { rows: [] };
-    const pendingRow = pending.rows[0] ?? null;
+    const setup = pending.rows.filter(
+      (row) => row.kind !== 'SETUP_CREATOR_MINT',
+    );
+    const pendingRows =
+      setup.length > 0
+        ? setup.slice(0, 1)
+        : pending.rows
+            .filter((row) => row.kind === 'SETUP_CREATOR_MINT')
+            .slice(0, CREATOR_MINT_BATCH_SIZE);
     return {
       seasonId: row.canvas_id,
       creatorId: row.creator_id,
@@ -193,13 +202,11 @@ export class SeasonNftMintQuery {
             collectionAddress: current.collection_address,
           }
         : null,
-      pendingTransaction: pendingRow
-        ? {
-            id: pendingRow.id,
-            kind: pendingRow.kind,
-            serializedTransaction: pendingRow.serialized_transaction,
-          }
-        : null,
+      pendingTransactions: pendingRows.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        serializedTransaction: row.serialized_transaction,
+      })),
     };
   }
 

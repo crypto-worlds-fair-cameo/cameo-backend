@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TurboFactory } from '@ardrive/turbo-sdk';
 import {
@@ -11,10 +11,13 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import bs58 from 'bs58';
 import type { AllConfigType } from '../../../../config/config.type';
 import { TransactionRunner } from '../../../../database/transaction/transaction-runner';
+import { SeasonNftRepository } from '../season-nft/season-nft.repository';
 import {
   setupOperationKey,
   type SeasonNftNetwork,
 } from '../season-nft/season-nft';
+import { CreatorSignaturePresence } from '../solana-nft/creator-signature-presence';
+import { shouldRefreshCreatorTransaction } from '../solana-nft/creator-signature-wait';
 import { NftTransactionRepository } from '../solana-nft/nft-transaction.repository';
 import { TurboMediaTransport } from './turbo-sdk-media-transport';
 
@@ -74,6 +77,8 @@ export class SeasonNftStorageFund {
     private readonly transport: TurboMediaTransport,
     private readonly transactions: TransactionRunner,
     private readonly nftTransactions: NftTransactionRepository,
+    @Optional() private readonly presence?: CreatorSignaturePresence,
+    @Optional() private readonly releases?: SeasonNftRepository,
   ) {}
 
   /** 지금 올릴 바이트와 이후 메타데이터 여유분까지 포함한 lamports 견적을 반환한다. */
@@ -133,6 +138,20 @@ export class SeasonNftStorageFund {
         existing.state === 'FAILED' ||
         existing.state === 'EXPIRED'
       ) {
+        if (
+          existing?.state === 'EXPIRED' &&
+          this.presence &&
+          this.releases &&
+          !shouldRefreshCreatorTransaction({
+            now: Date.now(),
+            lastSeenAt: this.presence.lastSeen(input.releaseId),
+          })
+        ) {
+          await this.releases.deferCreatorSignature({
+            releaseId: input.releaseId,
+          });
+          return false;
+        }
         await this.preparePayment({
           ...input,
           operationKey,

@@ -7,6 +7,10 @@ import { getPgExecutor } from '../../../../database/transaction/pg-executor';
 import type { TransactionContext } from '../../../../database/transaction/transaction-context';
 import { TransactionRunner } from '../../../../database/transaction/transaction-runner';
 import { withDbOnlyRetry } from '../nft-worker/db-only-retry';
+import {
+  CREATOR_AWAITING_SIGNATURE,
+  CREATOR_SIGNATURE_DEFER_MS,
+} from '../solana-nft/creator-signature-wait';
 import type {
   SeasonNftNetwork,
   SeasonNftReleaseRecord,
@@ -325,6 +329,55 @@ export class SeasonNftRepository {
           });
         }
         return claimed;
+      }),
+    );
+  }
+
+  /**
+   * 개설자가 발행 화면을 떠나 서명 거래가 만료되면 새 거래를 만들지 않고 준비를 미룬다.
+   * 상태는 PREPARING으로 두어, 화면을 다시 열면 멈춘 단계부터 이어진다.
+   */
+  async deferCreatorSignature(
+    input: Readonly<{ releaseId: string }>,
+  ): Promise<void> {
+    await withDbOnlyRetry(() =>
+      this.transactions.run(async (transaction) => {
+        const release = await this.lockRelease(input.releaseId, transaction);
+        if (release.state !== 'PREPARING') return;
+        await getPgExecutor(this.pool, transaction).query(
+          `UPDATE season_nft_releases
+           SET next_attempt_at = statement_timestamp() +
+                 ($2::double precision * interval '1 millisecond'),
+               last_error_code = $3,
+               last_error_message = $4,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND state = 'PREPARING'`,
+          [
+            input.releaseId,
+            CREATOR_SIGNATURE_DEFER_MS,
+            CREATOR_AWAITING_SIGNATURE,
+            'Waiting for the creator to reopen NFT minting.',
+          ],
+        );
+      }),
+    );
+  }
+
+  /** 개설자가 발행 화면을 다시 열면 미뤄 둔 준비를 바로 다시 집게 한다. */
+  async resumeCreatorSignature(
+    input: Readonly<{ releaseId: string }>,
+  ): Promise<void> {
+    await withDbOnlyRetry(() =>
+      this.transactions.run(async (transaction) => {
+        await getPgExecutor(this.pool, transaction).query(
+          `UPDATE season_nft_releases
+           SET next_attempt_at = statement_timestamp(),
+               last_error_code = NULL,
+               last_error_message = NULL,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND state = 'PREPARING' AND last_error_code = $2`,
+          [input.releaseId, CREATOR_AWAITING_SIGNATURE],
+        );
       }),
     );
   }

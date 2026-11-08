@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -33,6 +33,11 @@ import {
   setupOperationKey,
   type SeasonNftNetwork,
 } from '../season-nft/season-nft';
+import { CreatorSignaturePresence } from './creator-signature-presence';
+import {
+  CREATOR_MINT_BATCH_SIZE,
+  shouldRefreshCreatorTransaction,
+} from './creator-signature-wait';
 import {
   NftOperationPermanentError,
   NftOperationRetryError,
@@ -1410,6 +1415,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     private readonly keys: PreparationKeyStore,
     private readonly umiFactory: SeasonNftUmiFactory,
     private readonly transport: SeasonNftRpcTransport,
+    @Optional() private readonly presence?: CreatorSignaturePresence,
   ) {
     super();
   }
@@ -1772,7 +1778,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     if (creatorPaid(source)) {
       const allocation = creatorAllocationOf(source);
       if (source.creatorMintedCount < BigInt(allocation)) {
-        await this.prepareCreatorMint(identity, checkpoint);
+        await this.prepareCreatorMints(identity, checkpoint);
         return;
       }
       if (creatorClaimsReady(source, accounts, identity.lock)) {
@@ -1902,12 +1908,44 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     );
   }
 
-  private async prepareCreatorMint(
+  /** 개설자 몫은 한 번에 여러 개 준비해 팬텀 확인 한 번으로 서명하게 한다. */
+  private async prepareCreatorMints(
     identity: ReleaseIdentity,
     checkpoint: BlockhashCheckpoint,
   ): Promise<void> {
     const source = identity.source;
-    const index = Number(source.creatorMintedCount);
+    const allocation = creatorAllocationOf(source);
+    const start = Number(source.creatorMintedCount);
+    const inFlight = new Set(
+      await this.nftTransactions.listInFlightCreatorMints({
+        network: source.network,
+        releaseId: source.releaseId,
+      }),
+    );
+    if (inFlight.size >= CREATOR_MINT_BATCH_SIZE) return;
+    for (
+      let index = start;
+      index < allocation && inFlight.size < CREATOR_MINT_BATCH_SIZE;
+      index += 1
+    ) {
+      const operationKey = setupOperationKey('creator-mint', index);
+      if (inFlight.has(operationKey)) continue;
+      const outcome = await this.prepareCreatorMint(
+        identity,
+        checkpoint,
+        index,
+      );
+      if (outcome === 'paused' || outcome === 'advanced') return;
+      if (outcome === 'stored') inFlight.add(operationKey);
+    }
+  }
+
+  private async prepareCreatorMint(
+    identity: ReleaseIdentity,
+    checkpoint: BlockhashCheckpoint,
+    index: number,
+  ): Promise<'paused' | 'advanced' | 'stored' | 'unchanged'> {
+    const source = identity.source;
     const operationKey = setupOperationKey('creator-mint', index);
     const existing = await this.nftTransactions.findByOperation({
       network: source.network,
@@ -1915,6 +1953,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       operationKey,
     });
     if (existing && ['FINALIZED', 'RECONCILED'].includes(existing.state)) {
+      if (index !== Number(source.creatorMintedCount)) return 'unchanged';
       await withDbOnlyRetry(() =>
         this.transactions.run((databaseTransaction) =>
           this.releases.incrementCreatorMinted(
@@ -1928,10 +1967,10 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
         ),
       );
       this.checkpoints.delete(source.releaseId);
-      return;
+      return 'advanced';
     }
     const asset = generateSigner(identity.umi);
-    await this.prepareOperation(
+    return this.prepareOperation(
       identity,
       operationKey,
       'SETUP_CREATOR_MINT',
@@ -1959,7 +1998,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     builder: TransactionBuilder,
     checkpoint: BlockhashCheckpoint,
     assetAddress?: string,
-  ): Promise<void> {
+  ): Promise<'paused' | 'stored' | 'unchanged'> {
     const existing = await this.nftTransactions.findByOperation({
       network: identity.source.network,
       releaseId: identity.source.releaseId,
@@ -1968,7 +2007,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     const creatorSigns = creatorPaid(identity.source);
     if (existing?.state === 'PREPARED') {
       if (!creatorSigns) await this.promotePrepared(identity.umi, existing);
-      return;
+      return 'unchanged';
     }
     if (existing && ['FINALIZED', 'RECONCILED'].includes(existing.state)) {
       throw new NftOperationPermanentError(
@@ -1976,7 +2015,23 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
         'A finalized setup transaction has no matching finalized account effect.',
       );
     }
-    if (existing && !['FAILED', 'EXPIRED'].includes(existing.state)) return;
+    if (existing && !['FAILED', 'EXPIRED'].includes(existing.state))
+      return 'unchanged';
+    // 서명이 없는 채 블록해시만 만료된 거래를, 개설자가 화면을 떠나 있으면 다시 만들지 않는다.
+    if (
+      creatorSigns &&
+      existing?.state === 'EXPIRED' &&
+      this.presence &&
+      !shouldRefreshCreatorTransaction({
+        now: Date.now(),
+        lastSeenAt: this.presence.lastSeen(identity.source.releaseId),
+      })
+    ) {
+      await this.releases.deferCreatorSignature({
+        releaseId: identity.source.releaseId,
+      });
+      return 'paused';
+    }
     const ready = creatorSigns
       ? withCreatorBudget(builder)
           .setFeePayer(
@@ -2028,6 +2083,7 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
     if (durable.state === 'PREPARED' && !creatorSigns)
       await this.promotePrepared(identity.umi, durable);
     this.checkpoints.delete(identity.source.releaseId);
+    return 'stored';
   }
 
   private async promotePrepared(
