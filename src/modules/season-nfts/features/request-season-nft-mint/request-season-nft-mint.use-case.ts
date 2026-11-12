@@ -420,8 +420,7 @@ export class RequestSeasonNftMintUseCase {
       (source.release?.creatorMintedCount ?? 0n) > 0n;
     const requested =
       !supplyLocked && supplyText ? this.supplyFor(source, supplyText) : null;
-    const supply =
-      requested ?? stored ?? BigInt(Math.max(eligibleCount, 1));
+    const supply = requested ?? stored ?? BigInt(Math.max(eligibleCount, 1));
     const allocation =
       supply - BigInt(Math.max(eligibleCount, 1)) + 1n > 0n
         ? supply - BigInt(Math.max(eligibleCount, 1)) + 1n
