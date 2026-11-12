@@ -413,15 +413,15 @@ export class RequestSeasonNftMintUseCase {
     }
     const eligibleCount = source.eligibility.length;
     const stored = source.release?.supply ?? null;
-    // 참가자 명단이 고정되기 전에는 방금 고른 수량으로 견적을 다시 낸다.
-    // 이미 저장된 수량을 그대로 쓰면 취소를 눌러도 예전 수량이 계속 보인다.
-    const frozen = source.release?.eligibleCount != null;
+    // 컬렉션이 체인에 생기기 전에는 방금 고른 수량으로 견적을 다시 낸다.
+    // 참가자 명단이 고정된 뒤에도, 서명을 하기 전이면 수량을 바꿀 수 있다.
+    const supplyLocked =
+      source.release?.collectionAddress != null ||
+      (source.release?.creatorMintedCount ?? 0n) > 0n;
     const requested =
-      !frozen && supplyText ? this.supplyFor(source, supplyText) : null;
+      !supplyLocked && supplyText ? this.supplyFor(source, supplyText) : null;
     const supply =
       requested ?? stored ?? BigInt(Math.max(eligibleCount, 1));
-    const quotingNewSupply =
-      requested !== null && stored !== null && requested !== stored;
     const allocation =
       supply - BigInt(Math.max(eligibleCount, 1)) + 1n > 0n
         ? supply - BigInt(Math.max(eligibleCount, 1)) + 1n
@@ -437,17 +437,15 @@ export class RequestSeasonNftMintUseCase {
             paysStorage,
           )
         : null;
-    const pending = (quotingNewSupply ? [] : source.pendingTransactions).map(
-      (item) => ({
-        transactionId: item.id,
-        serializedTransactionBase64:
-          item.serializedTransaction.toString('base64'),
-        purpose:
-          item.kind === 'SETUP_CREATOR_MINT'
-            ? ('CREATOR_MINT' as const)
-            : ('SETUP' as const),
-      }),
-    );
+    const pending = source.pendingTransactions.map((item) => ({
+      transactionId: item.id,
+      serializedTransactionBase64:
+        item.serializedTransaction.toString('base64'),
+      purpose:
+        item.kind === 'SETUP_CREATOR_MINT'
+          ? ('CREATOR_MINT' as const)
+          : ('SETUP' as const),
+    }));
     return {
       seasonId: source.seasonId,
       status: source.release?.state ?? 'NONE',
@@ -471,7 +469,7 @@ export class RequestSeasonNftMintUseCase {
         paysStorage,
       }),
       step: approvalStep(
-        quotingNewSupply ? undefined : source.pendingTransactions[0]?.kind,
+        source.pendingTransactions[0]?.kind,
         Number(allocation),
         Number(source.release?.creatorMintedCount ?? 0n),
         paysStorage,

@@ -1214,6 +1214,38 @@ export class SeasonNftRepository {
   ): Promise<Readonly<{ updated: boolean }>> {
     const executor = getPgExecutor(this.pool, transaction);
     const release = await this.lockRelease(input.releaseId, transaction);
+    const signed = async () => {
+      const rows = await executor.query(
+        `SELECT 1
+         FROM season_nft_transactions
+         WHERE release_id = $1
+           AND state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED', 'FINALIZED', 'RECONCILED')
+         LIMIT 1`,
+        [input.releaseId],
+      );
+      return rows.rows.length > 0;
+    };
+    // 참가자 명단은 고정됐지만 아직 체인에 올리기 전이면 수량만 바꾼다.
+    if (
+      BigInt(release.version) === input.expectedVersion &&
+      release.eligible_count !== null &&
+      release.collection_address === null &&
+      release.state === 'PREPARING'
+    ) {
+      if (await signed()) return { updated: false };
+      const result = await executor.query(
+        `UPDATE season_nft_releases
+         SET supply = $3, version = version + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND version = $2 AND collection_address IS NULL
+         RETURNING id`,
+        [
+          input.releaseId,
+          input.expectedVersion.toString(),
+          input.supply.toString(),
+        ],
+      );
+      return { updated: result.rows.length === 1 };
+    }
     const preparing =
       release.state === 'PREPARING' && release.eligible_count === null;
     const editable =
