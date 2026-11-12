@@ -1214,15 +1214,36 @@ export class SeasonNftRepository {
   ): Promise<Readonly<{ updated: boolean }>> {
     const executor = getPgExecutor(this.pool, transaction);
     const release = await this.lockRelease(input.releaseId, transaction);
+    const preparing =
+      release.state === 'PREPARING' && release.eligible_count === null;
     const editable =
       BigInt(release.version) === input.expectedVersion &&
       release.eligible_count === null &&
       (release.state === 'WAITING_SNAPSHOT' ||
+        preparing ||
         (input.resumeBlocked &&
           release.state === 'BLOCKED' &&
           release.last_error_code ===
             SeasonNftInternalErrorCodes.SupplyBelowEligible));
     if (!editable) return { updated: false };
+    if (preparing) {
+      // 아직 서명되지 않은 준비 거래만 있을 때 수량을 바꾼다. 서명이 있으면 수량을 유지한다.
+      const signed = await executor.query(
+        `SELECT 1
+         FROM season_nft_transactions
+         WHERE release_id = $1
+           AND state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED', 'FINALIZED', 'RECONCILED')
+         LIMIT 1`,
+        [input.releaseId],
+      );
+      if (signed.rows.length > 0) return { updated: false };
+      await executor.query(
+        `UPDATE season_nft_transactions
+         SET state = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
+         WHERE release_id = $1 AND state = 'PREPARED'`,
+        [input.releaseId],
+      );
+    }
     const result = await executor.query(
       `UPDATE season_nft_releases
        SET supply = $3, nft_description = $4,
