@@ -23,19 +23,25 @@ import { assertAuthOrigin } from '../../../auth/resources/auth-origin/auth-origi
 import { SessionAuthenticator } from '../../../auth/resources/session/session-authenticator';
 import { CanvasSnapshotFiles } from '../../../canvas/resources/canvas-snapshot/canvas-snapshot-files';
 import { SeasonNftStorageFund } from '../../resources/nft-media/season-nft-storage-fund';
-import type { SeasonNftNetwork } from '../../resources/season-nft/season-nft';
+import type {
+  SeasonNftNetwork,
+  SeasonNftTransactionKind,
+} from '../../resources/season-nft/season-nft';
 import { SeasonNftInternalErrorCodes } from '../../resources/season-nft/season-nft.error-codes';
 import { SeasonNftRepository } from '../../resources/season-nft/season-nft.repository';
 import { CreatorSignaturePresence } from '../../resources/solana-nft/creator-signature-presence';
 import {
   CREATOR_AWAITING_SIGNATURE,
+  creatorApprovalStep,
   creatorWalletApprovalCount,
 } from '../../resources/solana-nft/creator-signature-wait';
 import { NftTransactionRepository } from '../../resources/solana-nft/nft-transaction.repository';
 import { SeasonNftRpcTransport } from '../../resources/solana-nft/season-release-chain';
+import { NftServerCosigner } from '../../resources/solana-nft/server-cosigner';
 import {
+  isSignedTransactionRejection,
   signedTransactionRejection,
-  validateSignedClaimTransaction,
+  validateWalletSignedTransaction,
 } from '../../resources/solana-nft/signed-transaction-validator';
 import { MAX_CREATOR_ALLOCATION } from '../../resources/season-nft/season-nft-eligibility';
 import {
@@ -70,6 +76,8 @@ export type SeasonNftMintView = Readonly<{
   walletAddress: string;
   mintedCount: string;
   signatureCount: number;
+  /** 지금 지갑 확인이 전체 중 몇 번째인지. 확인할 거래가 없으면 null. */
+  step: number | null;
   collectionAddress: string | null;
   pendingTransaction: Readonly<{
     transactionId: string;
@@ -82,6 +90,32 @@ export type SeasonNftMintView = Readonly<{
     purpose: 'SETUP' | 'CREATOR_MINT';
   }>[];
 }>;
+
+/** 확인할 거래가 있을 때만 몇 번째 확인인지 계산한다. */
+function approvalStep(
+  kind: SeasonNftTransactionKind | undefined,
+  allocation: number,
+  mintedCount: number,
+  paysStorage: boolean,
+): number | null {
+  if (
+    kind !== 'SETUP_STORAGE_FUND' &&
+    kind !== 'SETUP_COLLECTION' &&
+    kind !== 'SETUP_MACHINE' &&
+    kind !== 'SETUP_GUARD' &&
+    kind !== 'SETUP_LOCK' &&
+    kind !== 'SETUP_CREATOR_MINT'
+  ) {
+    return null;
+  }
+  return creatorApprovalStep({
+    allocation,
+    mintedCount,
+    paysStorage,
+    setupCount: Number(SETUP_TRANSACTION_COUNT),
+    pendingKind: kind,
+  });
+}
 
 function parseSupply(value: string): bigint {
   if (!/^[1-9][0-9]{0,15}$/u.test(value)) {
@@ -116,6 +150,7 @@ export class RequestSeasonNftMintUseCase {
     private readonly transport: SeasonNftRpcTransport,
     private readonly snapshots: CanvasSnapshotFiles,
     private readonly presence: CreatorSignaturePresence,
+    private readonly cosigner: NftServerCosigner,
     @Optional() private readonly storageFund?: SeasonNftStorageFund,
   ) {}
 
@@ -218,25 +253,35 @@ export class RequestSeasonNftMintUseCase {
     if (owned.creatorWalletAddress !== actor.walletAddress) {
       throw new BusinessError(ErrorCodes.NftWalletMismatch);
     }
-    let validated;
+    let walletSigned;
     try {
-      validated = validateSignedClaimTransaction({
+      walletSigned = validateWalletSignedTransaction({
         preparedBytes: owned.serializedTransaction,
         submittedBase64: signedTransactionBase64,
         expectedPayer: actor.walletAddress,
         expectedMessageHash: owned.messageHash,
       });
     } catch (error: unknown) {
-      // 서명 bytes와 인증 정보 없이 고정된 검증 실패 사유만 기록해 지갑 호환성을 진단한다.
-      this.logger.warn({
-        event: 'season_nft.signature_rejected',
-        transactionId,
-        reason: signedTransactionRejection(error),
-      });
-      throw new BusinessError(ErrorCodes.NftTransactionInvalid);
+      this.rejectSignature(transactionId, error);
     }
     if (owned.state === 'EXPIRED' || owned.state === 'FAILED') {
       throw new BusinessError(ErrorCodes.NftTransactionExpired);
+    }
+    // 지갑이 먼저 서명한 뒤에 컬렉션·발행 장치·NFT·서비스 서명을 서버가 채운다.
+    let validated;
+    try {
+      validated = await this.cosigner.complete({
+        network: owned.network,
+        releaseId: owned.releaseId,
+        operationKey: owned.operationKey,
+        collectionAddress: owned.collectionAddress,
+        candyMachineAddress: owned.candyMachineAddress,
+        validated: walletSigned,
+      });
+    } catch (error: unknown) {
+      // 서버 열쇠를 읽지 못한 실패는 제출한 거래의 잘못이 아니므로 그대로 올린다.
+      if (!isSignedTransactionRejection(error)) throw error;
+      this.rejectSignature(transactionId, error);
     }
     if (validated.messageHash !== owned.messageHash) {
       this.logger.log({
@@ -261,6 +306,16 @@ export class RequestSeasonNftMintUseCase {
       throw new BusinessError(ErrorCodes.NftTransactionInvalidState);
     }
     return { accepted: true, signature: accepted.signature };
+  }
+
+  /** 서명 bytes와 인증 정보 없이 고정된 검증 실패 사유만 기록해 지갑 호환성을 진단한다. */
+  private rejectSignature(transactionId: string, error: unknown): never {
+    this.logger.warn({
+      event: 'season_nft.signature_rejected',
+      transactionId,
+      reason: signedTransactionRejection(error),
+    });
+    throw new BusinessError(ErrorCodes.NftTransactionInvalid);
   }
 
   private async actor(token: string | undefined): Promise<
@@ -409,6 +464,12 @@ export class RequestSeasonNftMintUseCase {
         setupCount: Number(SETUP_TRANSACTION_COUNT),
         paysStorage,
       }),
+      step: approvalStep(
+        source.pendingTransactions[0]?.kind,
+        Number(allocation),
+        Number(source.release?.creatorMintedCount ?? 0n),
+        paysStorage,
+      ),
       collectionAddress:
         source.release?.state === 'READY'
           ? source.release.collectionAddress

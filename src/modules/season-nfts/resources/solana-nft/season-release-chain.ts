@@ -8,7 +8,6 @@ import {
   createNoopSigner,
   createSignerFromKeypair,
   dateTime,
-  generateSigner,
   isNone,
   isSome,
   lamports,
@@ -16,6 +15,7 @@ import {
   publicKey,
   signerIdentity,
   some,
+  type KeypairSigner,
   type MaybeRpcAccount,
   type Option,
   type Pda,
@@ -33,6 +33,7 @@ import {
   setupOperationKey,
   type SeasonNftNetwork,
 } from '../season-nft/season-nft';
+import { deriveAssetSigner } from './asset-signer';
 import { CreatorSignaturePresence } from './creator-signature-presence';
 import {
   CREATOR_MINT_BATCH_SIZE,
@@ -908,7 +909,7 @@ const EXTERNAL_PLUGIN_ADAPTER_KEYS = [
 ] as const;
 const RELEASE_GUARD_NAMES = new Set(['allowList', 'mintLimit', 'startDate']);
 
-type ReleaseUmi = Readonly<{ umi: Umi; service: Signer }>;
+type ReleaseUmi = Readonly<{ umi: Umi; service: KeypairSigner }>;
 
 /** The service signer is reread through a no-follow bounded handle and never enters logs or DB. */
 @Injectable()
@@ -1388,7 +1389,7 @@ function lockVerification(
 type ReleaseIdentity = Readonly<{
   source: SeasonNftChainSource;
   umi: Umi;
-  service: Signer;
+  service: KeypairSigner;
   collection: Signer;
   machine: Signer;
   guard: Pda;
@@ -1969,7 +1970,13 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
       this.checkpoints.delete(source.releaseId);
       return 'advanced';
     }
-    const asset = generateSigner(identity.umi);
+    // 지갑이 서명한 뒤 서버가 NFT 주소로 서명해야 하므로 같은 열쇠를 다시 만들 수 있게 유도한다.
+    const asset = deriveAssetSigner(identity.umi, identity.service, {
+      network: source.network,
+      releaseId: source.releaseId,
+      operationKey,
+      blockhash: checkpoint.blockhash,
+    });
     return this.prepareOperation(
       identity,
       operationKey,
@@ -2039,12 +2046,15 @@ export class SeasonReleaseChain extends NftReleaseChainOperationProvider {
           )
           .setVersion('legacy')
       : builder;
-    const transaction = await ready
-      .setBlockhash({
-        blockhash: checkpoint.blockhash,
-        lastValidBlockHeight: Number(checkpoint.lastValidBlockHeight),
-      })
-      .buildAndSign(identity.umi);
+    const stamped = ready.setBlockhash({
+      blockhash: checkpoint.blockhash,
+      lastValidBlockHeight: Number(checkpoint.lastValidBlockHeight),
+    });
+    // 개설자가 서명하는 거래는 서명 칸을 모두 비워 둔다. 서버가 먼저 서명해 두면 Phantom이 위험한 요청으로 막는다.
+    // 서버 서명은 지갑 서명을 접수할 때 NftServerCosigner가 채운다.
+    const transaction = creatorSigns
+      ? stamped.build(identity.umi)
+      : await stamped.buildAndSign(identity.umi);
     const signedBytes = Buffer.from(
       identity.umi.transactions.serialize(transaction),
     );

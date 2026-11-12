@@ -23,6 +23,49 @@ export function shouldRefreshCreatorTransaction(
   return input.now - input.lastSeenAt < waitMs;
 }
 
+export type CreatorApprovalKind =
+  | 'SETUP_STORAGE_FUND'
+  | 'SETUP_COLLECTION'
+  | 'SETUP_MACHINE'
+  | 'SETUP_GUARD'
+  | 'SETUP_LOCK'
+  | 'SETUP_CREATOR_MINT';
+
+/**
+ * 지금 지갑에 보여줄 확인이 전체 중 몇 번째인지 반환한다.
+ * 저장 비용, 컬렉션, 발행 장치, 개설자 NFT 묶음, 잠금 순서다.
+ */
+export function creatorApprovalStep(
+  input: Readonly<{
+    allocation: number;
+    mintedCount: number;
+    paysStorage: boolean;
+    setupCount: number;
+    pendingKind: CreatorApprovalKind;
+    batchSize?: number;
+  }>,
+): number {
+  const total = creatorWalletApprovalCount(input);
+  const storage = input.paysStorage ? 1 : 0;
+  const batchSize = input.batchSize ?? CREATOR_MINT_BATCH_SIZE;
+  const mintBatch =
+    input.allocation <= 0
+      ? 0
+      : Math.floor(Math.max(0, input.mintedCount) / batchSize) + 1;
+  const step =
+    input.pendingKind === 'SETUP_STORAGE_FUND'
+      ? 1
+      : input.pendingKind === 'SETUP_COLLECTION'
+        ? storage + 1
+        : input.pendingKind === 'SETUP_MACHINE' ||
+            input.pendingKind === 'SETUP_GUARD'
+          ? storage + 2
+          : input.pendingKind === 'SETUP_CREATOR_MINT'
+            ? storage + 2 + mintBatch
+            : total;
+  return Math.min(Math.max(step, 1), Math.max(total, 1));
+}
+
 /** 팬텀에서 확인을 누르는 횟수. 준비 거래는 그대로고, 개설자 NFT는 묶음마다 한 번이다. */
 export function creatorWalletApprovalCount(
   input: Readonly<{

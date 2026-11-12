@@ -138,6 +138,9 @@ class SeasonNftMintResponse {
   signatureCount!: number;
 
   @ApiProperty({ nullable: true })
+  step!: number | null;
+
+  @ApiProperty({ nullable: true })
   collectionAddress!: string | null;
 
   @ApiProperty({ type: PendingMintTransactionResponse, nullable: true })

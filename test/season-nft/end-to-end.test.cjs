@@ -22,6 +22,7 @@ const { ClaimRepository } = require('../../dist/modules/season-nfts/resources/cl
 const { NftTransactionRepository } = require('../../dist/modules/season-nfts/resources/solana-nft/nft-transaction.repository');
 const { SeasonClaimChain, SeasonClaimEffectInspector, SeasonClaimReceiptLookup } = require('../../dist/modules/season-nfts/resources/solana-nft/season-claim-chain');
 const { SeasonReleaseChain } = require('../../dist/modules/season-nfts/resources/solana-nft/season-release-chain');
+const { NftServerCosigner } = require('../../dist/modules/season-nfts/resources/solana-nft/server-cosigner');
 const { NftTransactionDispatcher } = require('../../dist/modules/season-nfts/resources/solana-nft/nft-transaction-dispatcher');
 const { NftRuntimeQueue } = require('../../dist/modules/season-nfts/resources/nft-worker/nft-runtime-queue');
 const { NftRpcScheduler } = require('../../dist/modules/season-nfts/resources/nft-worker/rpc-scheduler');
@@ -119,6 +120,11 @@ async function signPrepared(member, serializedBase64) {
   ]);
   assert.equal(Buffer.from(budget[0].data).readUInt32LE(1), 200_000);
   assert.equal(Buffer.from(budget[1].data).readBigUInt64LE(1), 0n);
+  // 지갑이 먼저 서명하도록 준비 거래의 서명 칸은 모두 비어 있다.
+  assert.equal(
+    prepared.signatures.every((signature) => signature.every((byte) => byte === 0)),
+    true,
+  );
   const signed = await member.signer.signTransaction(prepared);
   return Buffer.from(context.transactions.serialize(signed)).toString('base64');
 }
@@ -269,7 +275,7 @@ class ClaimRpcFixture {
   }
 }
 
-function runtimeFixture(pool, rpc) {
+function runtimeFixture(pool, rpc, cosigner) {
   const runner = new PgTransactionRunner(pool);
   const claims = new ClaimRepository(pool, runner);
   const releases = new SeasonNftRepository(pool, runner);
@@ -289,7 +295,7 @@ function runtimeFixture(pool, rpc) {
     settings(), claims, rpc, runner,
   );
   const claimBuilder = new SeasonClaimChain(
-    settings(), claims, nftTransactions, rpc, runner,
+    settings(), claims, nftTransactions, rpc, runner, cosigner,
   );
   const receiptLookup = new SeasonClaimReceiptLookup(settings(), claims, rpc);
   const runtime = new NftRuntimeQueue(
@@ -475,9 +481,14 @@ test('normal season end reaches two claims through real use cases, runtime, disp
   assert.equal((await releases.findChainSource(frozen.releaseId)).state, 'READY');
 
   const rpc = new ClaimRpcFixture(pool, members);
+  // 재시작한 서버도 같은 서비스 열쇠로 NFT 주소의 서명을 다시 만든다.
+  const cosigner = new NftServerCosigner(
+    { create: async () => ({ umi: context, service }) },
+    {},
+  );
 
   for (const member of members) {
-    let fixture = runtimeFixture(pool, rpc);
+    let fixture = runtimeFixture(pool, rpc, cosigner);
     const create = new CreateClaimAttemptUseCase(
       settings(), authenticator(pool), fixture.claims, fixture.runner,
     );
@@ -497,6 +508,7 @@ test('normal season end reaches two claims through real use cases, runtime, disp
     );
     let submit = new SubmitClaimTransactionUseCase(
       settings(), authenticator(pool), fixture.nftTransactions, fixture.runner,
+      cosigner,
     );
     await submit.execute({
       origin: ORIGIN,
@@ -524,7 +536,7 @@ test('normal season end reaches two claims through real use cases, runtime, disp
        SET next_check_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [proof.transaction.transactionId],
     );
-    fixture = runtimeFixture(pool, rpc);
+    fixture = runtimeFixture(pool, rpc, cosigner);
     await fixture.runtime.scan(rpcScheduler());
     await waitFor(
       () => pool.query(
@@ -546,6 +558,7 @@ test('normal season end reaches two claims through real use cases, runtime, disp
     );
     submit = new SubmitClaimTransactionUseCase(
       settings(), authenticator(pool), fixture.nftTransactions, fixture.runner,
+      cosigner,
     );
     await submit.execute({
       origin: ORIGIN,
@@ -571,7 +584,7 @@ test('normal season end reaches two claims through real use cases, runtime, disp
        SET next_check_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [mint.transaction.transactionId],
     );
-    fixture = runtimeFixture(pool, rpc);
+    fixture = runtimeFixture(pool, rpc, cosigner);
     await fixture.runtime.scan(rpcScheduler());
     await waitFor(
       () => pool.query(
@@ -586,7 +599,7 @@ test('normal season end reaches two claims through real use cases, runtime, disp
        WHERE user_id = $1 AND release_id = $2`,
       [member.userId, frozen.releaseId],
     );
-    fixture = runtimeFixture(pool, rpc);
+    fixture = runtimeFixture(pool, rpc, cosigner);
     await fixture.runtime.scan(rpcScheduler());
     await waitFor(
       () => pool.query(

@@ -3,7 +3,6 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   createNoopSigner,
-  generateSigner,
   isSome,
   publicKey,
   signerIdentity,
@@ -31,6 +30,7 @@ import { withDbOnlyRetry } from '../nft-worker/db-only-retry';
 import type { NftRpcJob, NftRpcScheduler } from '../nft-worker/rpc-scheduler';
 import { NftTransactionRepository } from './nft-transaction.repository';
 import { SeasonNftRpcTransport } from './season-release-chain';
+import { NftServerCosigner } from './server-cosigner';
 import {
   type DispatchableNftTransaction,
   NftClaimEffectRpc,
@@ -177,6 +177,7 @@ function assertGuardAccount(account: MaybeRpcAccount, label: string): void {
   }
 }
 
+/** 서명 칸을 모두 비운 거래를 만든다. 지갑이 먼저 서명하고, NFT 주소의 서버 서명은 접수할 때 채운다. */
 function buildTransaction(
   umi: Umi,
   source: ClaimBuildSource,
@@ -184,7 +185,7 @@ function buildTransaction(
   asset: Signer | undefined,
   priorityMicroLamports = 0n,
   computeUnitLimit = 200_000,
-): Promise<Transaction> {
+): Transaction {
   const payer = createNoopSigner(publicKey(source.walletAddress));
   const priorityItem = {
     instruction: {
@@ -228,10 +229,7 @@ function buildTransaction(
     });
     // 0 수수료도 명시해 Phantom이 budget 명령을 추가하며 원본 message를 바꾸지 않게 한다.
     builder = builder.prepend([limitItem, priorityItem]);
-    return builder
-      .setVersion('legacy')
-      .setBlockhash(blockhash)
-      .buildAndSign(umi);
+    return builder.setVersion('legacy').setBlockhash(blockhash).build(umi);
   }
   if (!asset) throw new Error('Claim mint asset signer is missing.');
   let builder = candy.mintV1(umi, {
@@ -253,9 +251,9 @@ function buildTransaction(
     source.walletAddress
   )
     throw new Error('Claim mint builder encoded an unexpected initial owner.');
-  // Asset 부분 서명을 보존하려면 지갑에 전달하기 전 budget까지 확정해야 한다.
+  // 견적과 같은 거래에 서명받으려면 지갑에 전달하기 전 budget까지 확정해야 한다.
   builder = builder.prepend([limitItem, priorityItem]);
-  return builder.setVersion('legacy').setBlockhash(blockhash).buildAndSign(umi);
+  return builder.setVersion('legacy').setBlockhash(blockhash).build(umi);
 }
 
 /** 사용자 proof/mint는 SDK local build와 외부 RPC request를 분리해 shared limiter에 하나씩 등록한다. */
@@ -267,6 +265,7 @@ export class SeasonClaimChain extends NftClaimBuildOperationProvider {
     private readonly nftTransactions: NftTransactionRepository,
     private readonly transport: SeasonNftRpcTransport,
     private readonly transactions: TransactionRunner,
+    private readonly cosigner: NftServerCosigner,
   ) {
     super();
   }
@@ -381,8 +380,16 @@ export class SeasonClaimChain extends NftClaimBuildOperationProvider {
       rpcType: 'READ',
       run: (signal) => this.transport.getLatestBlockhash(signal),
     });
-    const asset = source.step === 'MINT' ? generateSigner(umi) : undefined;
-    let transaction = await buildTransaction(
+    const asset =
+      source.step === 'MINT'
+        ? await this.cosigner.assetSigner({
+            network: source.network,
+            releaseId: source.releaseId,
+            operationKey,
+            blockhash: checkpoint.blockhash,
+          })
+        : undefined;
+    let transaction = buildTransaction(
       umi,
       source,
       checkpoint.blockhash,
@@ -465,7 +472,7 @@ export class SeasonClaimChain extends NftClaimBuildOperationProvider {
         capLamports: priorityCap,
       });
       if (priority.quotedLamports > 0n) {
-        transaction = await buildTransaction(
+        transaction = buildTransaction(
           umi,
           source,
           checkpoint.blockhash,

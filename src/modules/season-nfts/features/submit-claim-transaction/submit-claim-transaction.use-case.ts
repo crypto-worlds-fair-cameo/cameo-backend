@@ -7,9 +7,11 @@ import { TransactionRunner } from '../../../../database/transaction/transaction-
 import { assertAuthOrigin } from '../../../auth/resources/auth-origin/auth-origin';
 import { SessionAuthenticator } from '../../../auth/resources/session/session-authenticator';
 import { NftTransactionRepository } from '../../resources/solana-nft/nft-transaction.repository';
+import { NftServerCosigner } from '../../resources/solana-nft/server-cosigner';
 import {
+  isSignedTransactionRejection,
   signedTransactionRejection,
-  validateSignedClaimTransaction,
+  validateWalletSignedTransaction,
 } from '../../resources/solana-nft/signed-transaction-validator';
 
 export type SubmitClaimInput = Readonly<{
@@ -36,9 +38,13 @@ export class SubmitClaimTransactionUseCase {
     private readonly authenticator: SessionAuthenticator,
     private readonly nftTransactions: NftTransactionRepository,
     private readonly transactions: TransactionRunner,
+    private readonly cosigner: NftServerCosigner,
   ) {}
 
-  /** 소유한 준비 거래만 검증하고 signed bytes를 commit한 결과를 반환한다. 외부 전송은 worker가 맡는다. */
+  /**
+   * 소유한 준비 거래만 검증하고 signed bytes를 commit한 결과를 반환한다. 외부 전송은 worker가 맡는다.
+   * 지갑이 먼저 서명한 NFT 발행 거래는 여기서 NFT 주소의 서버 서명을 채운다.
+   */
   async execute(input: SubmitClaimInput): Promise<SubmitClaimResult> {
     assertAuthOrigin(
       input.origin,
@@ -71,22 +77,31 @@ export class SubmitClaimTransactionUseCase {
       return { owned, actor };
     });
 
-    let validated;
+    let walletSigned;
     try {
-      validated = validateSignedClaimTransaction({
+      walletSigned = validateWalletSignedTransaction({
         preparedBytes: prepared.owned.serializedTransaction,
         submittedBase64: input.signedTransactionBase64,
         expectedPayer: prepared.actor.walletAddress,
         expectedMessageHash: prepared.owned.messageHash,
       });
     } catch (error: unknown) {
-      // 서명 bytes와 인증 정보 없이 고정된 검증 실패 사유만 기록해 지갑 호환성을 진단한다.
-      this.logger.warn({
-        event: 'season_nft.signature_rejected',
-        transactionId: input.transactionId,
-        reason: signedTransactionRejection(error),
+      this.reject(input.transactionId, error);
+    }
+    let validated;
+    try {
+      validated = await this.cosigner.complete({
+        network: prepared.owned.network,
+        releaseId: prepared.owned.releaseId,
+        operationKey: prepared.owned.operationKey,
+        collectionAddress: null,
+        candyMachineAddress: null,
+        validated: walletSigned,
       });
-      throw new BusinessError(ErrorCodes.NftTransactionInvalid);
+    } catch (error: unknown) {
+      // 서버 열쇠를 읽지 못한 실패는 제출한 거래의 잘못이 아니므로 그대로 올린다.
+      if (!isSignedTransactionRejection(error)) throw error;
+      this.reject(input.transactionId, error);
     }
     if (validated.messageHash !== prepared.owned.messageHash) {
       this.logger.log({
@@ -132,6 +147,16 @@ export class SubmitClaimTransactionUseCase {
       state: accepted.attemptState,
       signature: accepted.signature,
     };
+  }
+
+  /** 서명 bytes와 인증 정보 없이 고정된 검증 실패 사유만 기록해 지갑 호환성을 진단한다. */
+  private reject(transactionId: string, error: unknown): never {
+    this.logger.warn({
+      event: 'season_nft.signature_rejected',
+      transactionId,
+      reason: signedTransactionRejection(error),
+    });
+    throw new BusinessError(ErrorCodes.NftTransactionInvalid);
   }
 
   private async authenticate(

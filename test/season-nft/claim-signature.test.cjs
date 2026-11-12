@@ -7,7 +7,9 @@ const umiModule = require('@metaplex-foundation/umi');
 const { createUmi } = require('@metaplex-foundation/umi-bundle-defaults');
 
 const {
+  completeSignedTransaction,
   validateSignedClaimTransaction,
+  validateWalletSignedTransaction,
 } = require('../../dist/modules/season-nfts/resources/solana-nft/signed-transaction-validator');
 
 const SYSTEM_PROGRAM = '11111111111111111111111111111111';
@@ -59,29 +61,47 @@ async function signedMintFixture() {
       collection,
       mintArgs: { allowList: { merkleRoot: root }, mintLimit: { id: 0 } },
     });
+  const bytes = (transaction) =>
+    Buffer.from(umi.transactions.serialize(transaction));
+  /** 지갑이 extra를 덧붙여 다시 만든 거래. 서명 칸은 모두 비어 있다. */
+  const unsignedWith = (...extra) =>
+    mint().add(extra).setVersion('legacy').setBlockhash(BLOCKHASH).build(umi);
   const signed = await mint()
     .setVersion('legacy')
     .setBlockhash(BLOCKHASH)
     .buildAndSign(umi);
-  // 참가자와 asset이 모두 다시 서명해 서명 자체는 유효한, 안전 확인이 덧붙은 거래.
-  const guarded = await mint()
-    .add(walletGuard(participant.publicKey))
-    .setVersion('legacy')
-    .setBlockhash(BLOCKHASH)
-    .buildAndSign(umi);
+  const safetyCheck = walletGuard(participant.publicKey);
+  // 참가자와 asset이 모두 서명한, 안전 확인이 덧붙은 거래.
+  const guarded = await asset.signTransaction(
+    await participant.signTransaction(unsignedWith(safetyCheck)),
+  );
+  // 서버가 asset 서명을 미리 넣어 두던 예전 준비 거래.
   const prepared = {
     ...signed,
     signatures: signed.signatures.map((signature, index) =>
       index === 0 ? new Uint8Array(64) : signature,
     ),
   };
+  const input = (preparedBytes, submitted) => ({
+    preparedBytes,
+    submittedBase64: bytes(submitted).toString('base64'),
+    expectedPayer: String(participant.publicKey),
+    expectedMessageHash: createHash('sha256')
+      .update(signed.serializedMessage)
+      .digest('hex'),
+  });
   return {
     umi,
     participant,
     asset,
-    preparedBytes: Buffer.from(umi.transactions.serialize(prepared)),
-    signedBytes: Buffer.from(umi.transactions.serialize(signed)),
-    guardedBytes: Buffer.from(umi.transactions.serialize(guarded)),
+    safetyCheck,
+    unsignedWith,
+    input,
+    preparedBytes: bytes(prepared),
+    // 서명 칸을 모두 비운 지금의 준비 거래.
+    unsignedBytes: bytes(unsignedWith()),
+    signedBytes: bytes(signed),
+    guardedBytes: bytes(guarded),
     messageHash: createHash('sha256').update(signed.serializedMessage).digest('hex'),
   };
 }
@@ -194,6 +214,7 @@ test('validator rejects message tampering, missing payer signature, and changed 
     /required signature is missing or invalid/u,
   );
 
+  // 서버 서명 칸에 다른 값을 넣은 제출본은 서버가 다시 서명해 주지 않는 한 완성본이 아니다.
   const changedServer = {
     ...signed,
     signatures: signed.signatures.map((signature, index) =>
@@ -210,7 +231,7 @@ test('validator rejects message tampering, missing payer signature, and changed 
         expectedPayer: String(fixture.participant.publicKey),
         expectedMessageHash: fixture.messageHash,
       }),
-    /server signature changed/u,
+    /required signature is missing or invalid/u,
   );
 });
 
@@ -324,16 +345,156 @@ test('validator rejects every other change even when a wallet safety check is pr
   );
 });
 
-test('validator rejects wallet safety checks on a transaction the server also signs', async () => {
+test('the wallet signs first and the server fills its own signature afterward', async () => {
   const fixture = await signedMintFixture();
+  const { participant, asset } = fixture;
+  const walletOnly = await participant.signTransaction(fixture.unsignedWith());
+  const input = fixture.input(fixture.unsignedBytes, walletOnly);
+
+  // 서버 서명이 빠진 제출본은 그대로는 완성본이 아니다.
+  assert.throws(
+    () => validateSignedClaimTransaction(input),
+    /required signature is missing or invalid/u,
+  );
+  const walletSigned = validateWalletSignedTransaction(input);
+  assert.deepEqual(walletSigned.missingSigners, [String(asset.publicKey)]);
+  assert.equal(walletSigned.walletGuardCount, 0);
+
+  // 그 주소의 열쇠가 없으면 채우지 못한다.
+  await assert.rejects(
+    completeSignedTransaction(walletSigned, []),
+    /required signature is missing or invalid/u,
+  );
+  await assert.rejects(
+    completeSignedTransaction(walletSigned, [
+      umiModule.generateSigner(fixture.umi),
+    ]),
+    /required signature is missing or invalid/u,
+  );
+
+  const completed = await completeSignedTransaction(walletSigned, [asset]);
+  assert.deepEqual(completed.signedBytes, fixture.signedBytes);
+  assert.equal(completed.messageHash, fixture.messageHash);
+  assert.equal(completed.signature, walletSigned.signature);
+
+  // 접수 뒤에는 완성본이 저장된다. 같은 제출을 다시 보내도 같은 완성본이 나온다.
+  const replay = await completeSignedTransaction(
+    validateWalletSignedTransaction(
+      fixture.input(completed.signedBytes, walletOnly),
+    ),
+    [asset],
+  );
+  assert.deepEqual(replay.signedBytes, completed.signedBytes);
+
+  // 지갑 서명이 없으면 서버 서명을 채우는 단계로 가지 못한다.
   assert.throws(
     () =>
-      validateSignedClaimTransaction({
-        preparedBytes: fixture.preparedBytes,
-        submittedBase64: fixture.guardedBytes.toString('base64'),
-        expectedPayer: String(fixture.participant.publicKey),
-        expectedMessageHash: fixture.messageHash,
-      }),
+      validateWalletSignedTransaction(
+        fixture.input(fixture.unsignedBytes, fixture.unsignedWith()),
+      ),
+    /required signature is missing or invalid/u,
+  );
+
+  // 지갑이 끝에 byte를 붙인 message에 서명해 와도, 서버는 읽지 않은 bytes에 서명하지 않는다.
+  const unsigned = fixture.unsignedWith();
+  const padded = Buffer.concat([
+    Buffer.from(unsigned.serializedMessage),
+    Buffer.from([0]),
+  ]);
+  assert.throws(
+    () =>
+      validateWalletSignedTransaction(
+        fixture.input(fixture.unsignedBytes, {
+          ...unsigned,
+          serializedMessage: padded,
+          signatures: [
+            fixture.umi.eddsa.sign(padded, participant),
+            new Uint8Array(64),
+          ],
+        }),
+      ),
+    /canonical legacy wire encoding/u,
+  );
+});
+
+test('the server signs after the wallet adds safety checks to a transaction both sign', async () => {
+  const fixture = await signedMintFixture();
+  const { participant, asset, safetyCheck } = fixture;
+  const walletOnly = await participant.signTransaction(
+    fixture.unsignedWith(safetyCheck),
+  );
+  const walletSigned = validateWalletSignedTransaction(
+    fixture.input(fixture.unsignedBytes, walletOnly),
+  );
+  assert.equal(walletSigned.walletGuardCount, 1);
+  assert.deepEqual(walletSigned.missingSigners, [String(asset.publicKey)]);
+  const completed = await completeSignedTransaction(walletSigned, [asset]);
+  assert.deepEqual(completed.signedBytes, fixture.guardedBytes);
+  assert.notEqual(completed.messageHash, fixture.messageHash);
+
+  // 서버가 서명을 미리 넣어 둔 예전 준비 거래도, 모든 서명이 새 message에 맞으면 받는다.
+  const legacy = validateSignedClaimTransaction({
+    preparedBytes: fixture.preparedBytes,
+    submittedBase64: fixture.guardedBytes.toString('base64'),
+    expectedPayer: String(participant.publicKey),
+    expectedMessageHash: fixture.messageHash,
+  });
+  assert.equal(legacy.walletGuardCount, 1);
+  assert.deepEqual(legacy.signedBytes, fixture.guardedBytes);
+
+  // 계정을 읽기만 하는 확인은 서버 서명자를 가리켜도 된다.
+  const readOnlyCheck = item(
+    LIGHTHOUSE_PROGRAM,
+    [{ pubkey: asset.publicKey, isSigner: false, isWritable: false }],
+    [6, 4, 0],
+  );
+  assert.equal(
+    validateWalletSignedTransaction(
+      fixture.input(
+        fixture.unsignedBytes,
+        await participant.signTransaction(fixture.unsignedWith(readOnlyCheck)),
+      ),
+    ).walletGuardCount,
+    1,
+  );
+});
+
+test('added instructions cannot spend from a signer the server signs for', async () => {
+  const fixture = await signedMintFixture();
+  const { participant, asset } = fixture;
+  /** Lighthouse MemoryWrite(0)·MemoryClose(1)는 payer 서명자의 돈을 옮긴다. */
+  const memory = (payer, data) =>
+    item(
+      LIGHTHOUSE_PROGRAM,
+      [{ pubkey: payer.publicKey, isSigner: true, isWritable: true }],
+      data,
+      [payer],
+    );
+  const submit = async (extra) =>
+    validateWalletSignedTransaction(
+      fixture.input(
+        fixture.unsignedBytes,
+        await participant.signTransaction(fixture.unsignedWith(extra)),
+      ),
+    );
+
+  for (const data of [[0, 0, 0], [1, 0, 0], []]) {
+    await assert.rejects(
+      submit(memory(asset, data)),
+      /does not match the prepared transaction.*"cause":"guards"/u,
+    );
+  }
+  // 지갑이 자기 돈으로 하는 것은 지갑 자신의 서명이므로 받는다.
+  assert.equal((await submit(memory(participant, [0, 0, 0]))).walletGuardCount, 1);
+  // 다른 프로그램은 어떤 경우에도 덧붙일 수 없다.
+  await assert.rejects(
+    submit(item(MEMO_PROGRAM, [], [1])),
+    /does not match the prepared transaction.*"cause":"instructions"/u,
+  );
+  // 서명자를 늘리거나 바꿀 수 없다.
+  const stranger = umiModule.generateSigner(fixture.umi);
+  await assert.rejects(
+    submit(memory(stranger, [6, 4, 0])),
     /does not match the prepared transaction.*"cause":"signers"/u,
   );
 });

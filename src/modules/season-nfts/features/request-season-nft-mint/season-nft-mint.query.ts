@@ -217,23 +217,33 @@ export class SeasonNftMintQuery {
   ): Promise<Readonly<{
     transactionId: string;
     network: SeasonNftNetwork;
+    releaseId: string;
+    operationKey: string;
     state: string;
     messageHash: string;
     serializedTransaction: Buffer;
     creatorId: string;
     creatorWalletAddress: string | null;
+    collectionAddress: string | null;
+    candyMachineAddress: string | null;
   }> | null> {
     const result = await getPgExecutor(this.pool, transaction).query<{
       id: string;
       network: SeasonNftNetwork;
+      release_id: string;
+      operation_key: string;
       state: string;
       message_hash: string;
       serialized_transaction: Buffer;
       creator_id: string;
       creator_wallet_address: string | null;
+      collection_address: string | null;
+      candy_machine_address: string | null;
     }>(
-      `SELECT t.id, t.network, t.state, t.message_hash, t.serialized_transaction,
-              s.creator_id, r.creator_wallet_address
+      `SELECT t.id, t.network, t.release_id, t.operation_key, t.state,
+              t.message_hash, t.serialized_transaction,
+              s.creator_id, r.creator_wallet_address,
+              r.collection_address, r.candy_machine_address
        FROM season_nft_transactions t
        JOIN season_nft_releases r ON r.id = t.release_id AND r.network = t.network
        JOIN seasons s ON s.canvas_id = r.season_id
@@ -247,11 +257,15 @@ export class SeasonNftMintQuery {
     return {
       transactionId: row.id,
       network: row.network,
+      releaseId: row.release_id,
+      operationKey: row.operation_key,
       state: row.state,
       messageHash: row.message_hash,
       serializedTransaction: row.serialized_transaction,
       creatorId: row.creator_id,
       creatorWalletAddress: row.creator_wallet_address,
+      collectionAddress: row.collection_address,
+      candyMachineAddress: row.candy_machine_address,
     };
   }
 }

@@ -63,6 +63,8 @@ export type PreparedTransactionResult = Readonly<{
 export type OwnedClaimTransaction = Readonly<{
   transactionId: string;
   network: SeasonNftNetwork;
+  releaseId: string;
+  operationKey: string;
   state: SeasonNftTransactionState;
   messageHash: string;
   serializedTransaction: Buffer;
@@ -238,13 +240,16 @@ export class NftTransactionRepository extends NftDispatchRepository {
     const result = await getPgExecutor(this.pool, transaction).query<{
       id: string;
       network: SeasonNftNetwork;
+      release_id: string;
+      operation_key: string;
       state: SeasonNftTransactionState;
       message_hash: string;
       serialized_transaction: Buffer;
       signature: string | null;
       wallet_address: string;
     }>(
-      `SELECT t.id, t.network, t.state, t.message_hash, t.serialized_transaction,
+      `SELECT t.id, t.network, t.release_id, t.operation_key, t.state,
+              t.message_hash, t.serialized_transaction,
               t.signature, c.wallet_address
        FROM season_nft_transactions t
        JOIN season_nft_claim_attempts a ON a.id = t.attempt_id
@@ -268,6 +273,8 @@ export class NftTransactionRepository extends NftDispatchRepository {
       ? {
           transactionId: row.id,
           network: row.network,
+          releaseId: row.release_id,
+          operationKey: row.operation_key,
           state: row.state,
           messageHash: row.message_hash,
           serializedTransaction: row.serialized_transaction,
