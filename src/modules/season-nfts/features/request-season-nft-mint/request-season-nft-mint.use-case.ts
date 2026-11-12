@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   createNoopSigner,
@@ -33,7 +33,10 @@ import {
 } from '../../resources/solana-nft/creator-signature-wait';
 import { NftTransactionRepository } from '../../resources/solana-nft/nft-transaction.repository';
 import { SeasonNftRpcTransport } from '../../resources/solana-nft/season-release-chain';
-import { validateSignedClaimTransaction } from '../../resources/solana-nft/signed-transaction-validator';
+import {
+  signedTransactionRejection,
+  validateSignedClaimTransaction,
+} from '../../resources/solana-nft/signed-transaction-validator';
 import { MAX_CREATOR_ALLOCATION } from '../../resources/season-nft/season-nft-eligibility';
 import {
   SeasonNftMintQuery,
@@ -100,6 +103,7 @@ function accountSpaces(builder: TransactionBuilder): number[] {
 /** 개설자가 고른 수량으로 시즌 NFT 발행을 시작하고, 체인 거래 서명을 접수한다. */
 @Injectable()
 export class RequestSeasonNftMintUseCase {
+  private readonly logger = new Logger(RequestSeasonNftMintUseCase.name);
   private quoteCache?: Readonly<{ key: string; at: number; value: string }>;
 
   constructor(
@@ -222,17 +226,31 @@ export class RequestSeasonNftMintUseCase {
         expectedPayer: actor.walletAddress,
         expectedMessageHash: owned.messageHash,
       });
-    } catch {
+    } catch (error: unknown) {
+      // 서명 bytes와 인증 정보 없이 고정된 검증 실패 사유만 기록해 지갑 호환성을 진단한다.
+      this.logger.warn({
+        event: 'season_nft.signature_rejected',
+        transactionId,
+        reason: signedTransactionRejection(error),
+      });
       throw new BusinessError(ErrorCodes.NftTransactionInvalid);
     }
     if (owned.state === 'EXPIRED' || owned.state === 'FAILED') {
       throw new BusinessError(ErrorCodes.NftTransactionExpired);
+    }
+    if (validated.messageHash !== owned.messageHash) {
+      this.logger.log({
+        event: 'season_nft.wallet_guard_accepted',
+        transactionId,
+        walletGuardCount: validated.walletGuardCount,
+      });
     }
     const accepted = await this.transactions.run((transaction) =>
       this.nftTransactions.acceptSigned(
         {
           transactionId,
           expectedMessageHash: owned.messageHash,
+          signedMessageHash: validated.messageHash,
           signedBytes: validated.signedBytes,
           signature: validated.signature,
         },

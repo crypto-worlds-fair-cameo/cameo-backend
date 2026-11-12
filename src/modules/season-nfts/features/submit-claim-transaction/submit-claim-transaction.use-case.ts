@@ -7,7 +7,10 @@ import { TransactionRunner } from '../../../../database/transaction/transaction-
 import { assertAuthOrigin } from '../../../auth/resources/auth-origin/auth-origin';
 import { SessionAuthenticator } from '../../../auth/resources/session/session-authenticator';
 import { NftTransactionRepository } from '../../resources/solana-nft/nft-transaction.repository';
-import { validateSignedClaimTransaction } from '../../resources/solana-nft/signed-transaction-validator';
+import {
+  signedTransactionRejection,
+  validateSignedClaimTransaction,
+} from '../../resources/solana-nft/signed-transaction-validator';
 
 export type SubmitClaimInput = Readonly<{
   origin: string | undefined;
@@ -81,13 +84,16 @@ export class SubmitClaimTransactionUseCase {
       this.logger.warn({
         event: 'season_nft.signature_rejected',
         transactionId: input.transactionId,
-        reason:
-          error instanceof Error &&
-          error.message.startsWith('Signed transaction ')
-            ? error.message
-            : 'Transaction validation failed.',
+        reason: signedTransactionRejection(error),
       });
       throw new BusinessError(ErrorCodes.NftTransactionInvalid);
+    }
+    if (validated.messageHash !== prepared.owned.messageHash) {
+      this.logger.log({
+        event: 'season_nft.wallet_guard_accepted',
+        transactionId: input.transactionId,
+        walletGuardCount: validated.walletGuardCount,
+      });
     }
 
     // 서명 검사 뒤 새 트랜잭션에서 세션과 row lock 상태를 다시 확인해 stale 검사를 commit하지 않는다.
@@ -103,7 +109,8 @@ export class SubmitClaimTransactionUseCase {
             walletAccountId: authentication.walletAccountId,
             walletAddress: authentication.walletAddress,
           },
-          expectedMessageHash: validated.messageHash,
+          expectedMessageHash: prepared.owned.messageHash,
+          signedMessageHash: validated.messageHash,
           signedBytes: validated.signedBytes,
           signature: validated.signature,
         },

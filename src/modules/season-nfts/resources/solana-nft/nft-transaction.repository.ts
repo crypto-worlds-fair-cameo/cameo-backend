@@ -285,6 +285,8 @@ export class NftTransactionRepository extends NftDispatchRepository {
       transactionId: string;
       actor: ClaimTransactionActor;
       expectedMessageHash: string;
+      /** 지갑이 안전 확인을 덧붙여 서명한 message의 hash. 없으면 준비 hash와 같다. */
+      signedMessageHash?: string;
       signedBytes: Buffer;
       signature: string;
     }>,
@@ -330,7 +332,13 @@ export class NftTransactionRepository extends NftDispatchRepository {
     if (!owned || row.attempt_id !== input.attemptId) {
       return { outcome: 'NOT_FOUND' };
     }
-    if (row.message_hash !== input.expectedMessageHash) {
+    const signedMessageHash =
+      input.signedMessageHash ?? input.expectedMessageHash;
+    // 접수 전 행은 준비 message의 hash를, 접수된 행은 서명된 message의 hash를 갖는다.
+    if (
+      row.message_hash !==
+      (row.state === 'PREPARED' ? input.expectedMessageHash : signedMessageHash)
+    ) {
       return { outcome: 'INVALID_STATE' };
     }
     // 과거 거래의 exact bytes replay는 현재 attempt step이 진행됐어도 기존 signature를 반환한다.
@@ -356,11 +364,17 @@ export class NftTransactionRepository extends NftDispatchRepository {
     }
     const updated = await executor.query<TransactionRow>(
       `UPDATE season_nft_transactions
-       SET serialized_transaction = $2, signature = $3, state = 'SIGNED',
+       SET serialized_transaction = $2, signature = $3, message_hash = $4,
+           state = 'SIGNED',
            next_check_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND state = 'PREPARED'
        RETURNING ${TRANSACTION_COLUMNS}`,
-      [input.transactionId, input.signedBytes, input.signature],
+      [
+        input.transactionId,
+        input.signedBytes,
+        input.signature,
+        signedMessageHash,
+      ],
     );
     if (!updated.rows[0]) return { outcome: 'INVALID_STATE' };
     await executor.query(
@@ -488,11 +502,15 @@ export class NftTransactionRepository extends NftDispatchRepository {
     return this.preparedResult(inserted.rows[0], true);
   }
 
-  /** 지정 거래의 message hash를 재확인하고 완전 서명 bytes와 signature를 원자적으로 접수한다. */
+  /**
+   * 지정 거래의 message hash를 재확인하고 완전 서명 bytes와 signature를 원자적으로 접수한다.
+   * 지갑이 안전 확인을 덧붙여 message가 달라졌으면 서명된 message의 hash로 바꿔 저장한다.
+   */
   async acceptSigned(
     input: Readonly<{
       transactionId: string;
       expectedMessageHash: string;
+      signedMessageHash?: string;
       signedBytes: Buffer;
       signature: string;
     }>,
@@ -505,18 +523,30 @@ export class NftTransactionRepository extends NftDispatchRepository {
     }>
   > {
     const row = await this.lockTransaction(input.transactionId, transaction);
-    if (row.message_hash !== input.expectedMessageHash) {
+    const signedMessageHash =
+      input.signedMessageHash ?? input.expectedMessageHash;
+    // 접수 전 행은 준비 message의 hash를, 접수된 행은 서명된 message의 hash를 갖는다.
+    if (
+      row.message_hash !==
+      (row.state === 'PREPARED' ? input.expectedMessageHash : signedMessageHash)
+    ) {
       throw new Error('Season NFT transaction message hash does not match.');
     }
     const executor = getPgExecutor(this.pool, transaction);
     if (row.state === 'PREPARED') {
       const updated = await executor.query<TransactionRow>(
         `UPDATE season_nft_transactions
-         SET serialized_transaction = $2, signature = $3, state = 'SIGNED',
+         SET serialized_transaction = $2, signature = $3, message_hash = $4,
+             state = 'SIGNED',
              next_check_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND state = 'PREPARED'
          RETURNING ${TRANSACTION_COLUMNS}`,
-        [input.transactionId, input.signedBytes, input.signature],
+        [
+          input.transactionId,
+          input.signedBytes,
+          input.signature,
+          signedMessageHash,
+        ],
       );
       return {
         accepted: true,

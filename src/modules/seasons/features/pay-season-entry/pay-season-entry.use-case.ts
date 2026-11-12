@@ -7,7 +7,10 @@ import type { TransactionContext } from '../../../../database/transaction/transa
 import { TransactionRunner } from '../../../../database/transaction/transaction-runner';
 import { assertAuthOrigin } from '../../../auth/resources/auth-origin/auth-origin';
 import { SessionAuthenticator } from '../../../auth/resources/session/session-authenticator';
-import { validateSignedClaimTransaction } from '../../../season-nfts/resources/solana-nft/signed-transaction-validator';
+import {
+  signedTransactionRejection,
+  validateSignedClaimTransaction,
+} from '../../../season-nfts/resources/solana-nft/signed-transaction-validator';
 import { getSeasonStatus } from '../../resources/season/season';
 import { SeasonRepository } from '../../resources/season/season.repository';
 import {
@@ -154,8 +157,21 @@ export class PaySeasonEntryUseCase {
           expectedPayer: payment.payerAddress,
           expectedMessageHash: payment.messageHash,
         });
-      } catch {
+      } catch (error: unknown) {
+        // 서명 bytes와 인증 정보 없이 고정된 검증 실패 사유만 기록해 지갑 호환성을 진단한다.
+        this.logger.warn({
+          event: 'season_entry.signature_rejected',
+          paymentId: payment.id,
+          reason: signedTransactionRejection(error),
+        });
         throw new BusinessError(ErrorCodes.SeasonEntryTransactionInvalid);
+      }
+      if (validated.messageHash !== payment.messageHash) {
+        this.logger.log({
+          event: 'season_entry.wallet_guard_accepted',
+          paymentId: payment.id,
+          walletGuardCount: validated.walletGuardCount,
+        });
       }
       const submitted = await this.payments.markSubmitted(
         payment.id,

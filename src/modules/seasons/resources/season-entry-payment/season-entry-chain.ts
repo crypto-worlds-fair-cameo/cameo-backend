@@ -14,7 +14,9 @@ import type { SeasonNftNetwork } from '../../../season-nfts/resources/season-nft
 
 const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 const COMPUTE_BUDGET_PROGRAM_ID = 'ComputeBudget111111111111111111111111111111';
-const TRANSFER_COMPUTE_UNIT_LIMIT = 5_000;
+// 전송 자체는 수백 unit이지만 mainnet 지갑이 덧붙이는 안전 확인도 같은 한도에서 실행된다.
+// 우선 수수료가 0이라 한도를 넉넉히 잡아도 비용은 늘지 않는다.
+const TRANSFER_COMPUTE_UNIT_LIMIT = 20_000;
 const RPC_TIMEOUT_MS = 8_000;
 // 거래 build에는 RPC가 필요 없으므로 blockhash를 직접 넣고 로컬 주소는 호출하지 않는다.
 const umi = createUmi('http://127.0.0.1:8899');
