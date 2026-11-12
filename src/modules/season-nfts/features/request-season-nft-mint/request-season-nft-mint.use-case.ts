@@ -214,6 +214,7 @@ export class RequestSeasonNftMintUseCase {
             expectedVersion: release.version,
             supply,
             nftDescription,
+            creatorWalletAddress: actor.walletAddress,
             resumeBlocked:
               release.lastErrorCode ===
               SeasonNftInternalErrorCodes.SupplyBelowEligible,
@@ -371,9 +372,6 @@ export class RequestSeasonNftMintUseCase {
     if (!source.ended) throw new BusinessError(ErrorCodes.NftMintNotEnded);
     if (source.creatorWalletAddress !== walletAddress) {
       throw new BusinessError(ErrorCodes.NftWalletMismatch);
-    }
-    if (source.release?.supply === null) {
-      throw new BusinessError(ErrorCodes.NftNotReady);
     }
   }
 

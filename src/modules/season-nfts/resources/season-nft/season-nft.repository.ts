@@ -1208,6 +1208,7 @@ export class SeasonNftRepository {
       expectedVersion: bigint;
       supply: bigint;
       nftDescription: string | null;
+      creatorWalletAddress: string;
       resumeBlocked: boolean;
     }>,
     transaction: TransactionContext,
@@ -1225,9 +1226,11 @@ export class SeasonNftRepository {
       );
       return rows.rows.length > 0;
     };
+    const versionMatches = BigInt(release.version) === input.expectedVersion;
     // 참가자 명단은 고정됐지만 아직 체인에 올리기 전이면 수량만 바꾼다.
     if (
-      BigInt(release.version) === input.expectedVersion &&
+      versionMatches &&
+      release.supply !== null &&
       release.eligible_count !== null &&
       release.collection_address === null &&
       release.state === 'PREPARING'
@@ -1235,13 +1238,80 @@ export class SeasonNftRepository {
       if (await signed()) return { updated: false };
       const result = await executor.query(
         `UPDATE season_nft_releases
-         SET supply = $3, version = version + 1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1 AND version = $2 AND collection_address IS NULL
+         SET supply = $3, creator_wallet_address = $4,
+             version = version + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND version = $2
+           AND supply IS NOT NULL AND collection_address IS NULL
          RETURNING id`,
         [
           input.releaseId,
           input.expectedVersion.toString(),
           input.supply.toString(),
+          input.creatorWalletAddress,
+        ],
+      );
+      return { updated: result.rows.length === 1 };
+    }
+    // 수량이 비어 있으면 예전 명단으로 만든 준비를 버리고, 고른 수량으로 다시 시작한다.
+    if (
+      versionMatches &&
+      release.supply === null &&
+      release.eligible_count !== null &&
+      release.collection_address === null &&
+      release.candy_machine_address === null &&
+      (release.state === 'PREPARING' || release.state === 'WAITING_SNAPSHOT')
+    ) {
+      if (await signed()) return { updated: false };
+      const claimed = await executor.query(
+        `SELECT 1
+         FROM season_nft_claims
+         WHERE release_id = $1 AND state <> 'UNCLAIMED'
+         LIMIT 1`,
+        [input.releaseId],
+      );
+      if (claimed.rows.length > 0) return { updated: false };
+      await executor.query(
+        `UPDATE season_nft_transactions
+         SET state = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
+         WHERE release_id = $1 AND state = 'PREPARED'`,
+        [input.releaseId],
+      );
+      await executor.query(
+        `DELETE FROM season_nft_claim_attempts
+         WHERE claim_id IN (
+           SELECT id FROM season_nft_claims WHERE release_id = $1
+         )`,
+        [input.releaseId],
+      );
+      await executor.query(
+        `DELETE FROM season_nft_claims
+         WHERE release_id = $1 AND state = 'UNCLAIMED'`,
+        [input.releaseId],
+      );
+      const result = await executor.query(
+        `UPDATE season_nft_releases
+         SET supply = $3, nft_description = $4, creator_wallet_address = $5,
+             state = 'WAITING_SNAPSHOT', stage = 'SNAPSHOT',
+             eligible_count = NULL, snapshot_id = NULL,
+             through_sequence = NULL, merkle_root = NULL, claim_group = NULL,
+             frozen_title = NULL, frozen_description = NULL,
+             season_ended_at = NULL, asset_name = NULL,
+             image_byte_length = NULL, image_sha256 = NULL,
+             metadata_sha256 = NULL, image_uri = NULL, metadata_uri = NULL,
+             preparation_keys = '{}'::jsonb,
+             locked_at = NULL, ready_at = NULL, retry_count = 0,
+             last_error_code = NULL, last_error_message = NULL,
+             next_attempt_at = CURRENT_TIMESTAMP,
+             version = version + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND version = $2
+           AND supply IS NULL AND collection_address IS NULL
+         RETURNING id`,
+        [
+          input.releaseId,
+          input.expectedVersion.toString(),
+          input.supply.toString(),
+          input.nftDescription,
+          input.creatorWalletAddress,
         ],
       );
       return { updated: result.rows.length === 1 };
@@ -1278,7 +1348,7 @@ export class SeasonNftRepository {
     }
     const result = await executor.query(
       `UPDATE season_nft_releases
-       SET supply = $3, nft_description = $4,
+       SET supply = $3, nft_description = $4, creator_wallet_address = $5,
            state = 'WAITING_SNAPSHOT', stage = 'SNAPSHOT',
            last_error_code = NULL, last_error_message = NULL,
            next_attempt_at = CURRENT_TIMESTAMP,
@@ -1290,6 +1360,7 @@ export class SeasonNftRepository {
         input.expectedVersion.toString(),
         input.supply.toString(),
         input.nftDescription,
+        input.creatorWalletAddress,
       ],
     );
     return { updated: result.rows.length === 1 };
