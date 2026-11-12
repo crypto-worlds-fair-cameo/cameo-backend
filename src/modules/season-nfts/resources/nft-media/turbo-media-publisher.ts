@@ -162,6 +162,15 @@ export class TurboMediaPublisher {
     ];
   }
 
+  /** Turbo가 이미 받아 receipt를 남긴 파일이면 true. 저장 비용은 그때 빠져나갔다. */
+  async isUploaded(
+    releaseId: string,
+    kind: SeasonNftUploadKind,
+  ): Promise<boolean> {
+    const row = await this.uploads.findItem(releaseId, kind);
+    return row?.state === 'UPLOADED' || row?.state === 'VERIFIED';
+  }
+
   /** exact payload를 한 번 서명·저장하고 같은 item을 receipt와 공개 hash 확인까지 재사용한다. */
   async publish(
     input: PublishMediaInput,

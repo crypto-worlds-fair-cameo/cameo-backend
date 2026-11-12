@@ -13,7 +13,10 @@ import {
 } from '../../../canvas/resources/canvas-snapshot/final-canvas-snapshot-reader';
 import { SeasonNftInternalErrorCodes } from '../../resources/season-nft/season-nft.error-codes';
 import { SeasonNftRepository } from '../../resources/season-nft/season-nft.repository';
-import type { SeasonNftNetwork } from '../../resources/season-nft/season-nft';
+import type {
+  SeasonNftNetwork,
+  SeasonNftUploadKind,
+} from '../../resources/season-nft/season-nft';
 import {
   buildAssetName,
   serializeSeasonMetadata,
@@ -322,6 +325,7 @@ export class PrepareSeasonNftUseCase {
     if (
       !(await this.creatorUploadReady(
         source,
+        'IMAGE',
         snapshot.pngBytes.length,
         io.signal,
       ))
@@ -432,7 +436,14 @@ export class PrepareSeasonNftUseCase {
         status: advanced.updated ? 'METADATA' : 'RETRY',
       };
     }
-    if (!(await this.creatorUploadReady(source, bytes.length, io.signal))) {
+    if (
+      !(await this.creatorUploadReady(
+        source,
+        'METADATA',
+        bytes.length,
+        io.signal,
+      ))
+    ) {
       return { releaseId: source.releaseId, status: 'RETRY' };
     }
     try {
@@ -571,6 +582,7 @@ export class PrepareSeasonNftUseCase {
     source: NonNullable<
       Awaited<ReturnType<SeasonNftRepository['findMediaSource']>>
     >,
+    kind: SeasonNftUploadKind,
     byteCount: number,
     signal: AbortSignal,
   ): Promise<boolean> {
@@ -579,6 +591,10 @@ export class PrepareSeasonNftUseCase {
       !this.storageFund ||
       source.network === 'devnet'
     ) {
+      return true;
+    }
+    // 이미 올린 파일은 비용이 빠져나간 뒤다. 공개 주소 확인을 기다리는 동안 잔액이 줄었다고 다시 청구하지 않는다.
+    if (await this.mediaPublisher?.isUploaded(source.releaseId, kind)) {
       return true;
     }
     return this.storageFund.ensure({

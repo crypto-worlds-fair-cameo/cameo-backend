@@ -886,6 +886,73 @@ test('disabled media preparation refuses work before repository or external I/O'
   assert.equal(publishCalls, 0);
 });
 
+test('an uploaded file waiting for the gateway does not ask the creator to pay again', async () => {
+  const releaseId = randomUUID();
+  const source = {
+    releaseId,
+    seasonId: randomUUID(),
+    network: 'mainnet-beta',
+    state: 'PREPARING',
+    stage: 'IMAGE',
+    version: 3n,
+    creatorWalletAddress: '11111111111111111111111111111111',
+    snapshotId: randomUUID(),
+    throughSequence: 0n,
+    eligibleCount: 1,
+    frozenTitle: 'Creator paid season',
+    frozenDescription: 'Original description',
+    seasonEndedAt: new Date('2026-11-11T00:00:00.000Z'),
+    imageByteLength: 1n,
+    imageSha256: 'a'.repeat(64),
+    imageUri: 'https://arweave.net/image-item',
+  };
+  let uploaded = true;
+  let ensureCalls = 0;
+  let publishCalls = 0;
+  const useCase = new PrepareSeasonNftUseCase(
+    new ConfigService({
+      seasonNft: { enabled: true, network: 'mainnet-beta' },
+    }),
+    undefined,
+    { findMediaSource: async () => source },
+    undefined,
+    undefined,
+    undefined,
+    {
+      isUploaded: async (id, kind) => {
+        assert.deepEqual([id, kind], [releaseId, 'METADATA']);
+        return uploaded;
+      },
+      publish: async () => {
+        publishCalls += 1;
+        const error = new Error('Permanent gateway returned HTTP 404.');
+        error.code = 'NFT_MEDIA_NOT_AVAILABLE';
+        throw error;
+      },
+    },
+    {
+      ensure: async () => {
+        ensureCalls += 1;
+        return false;
+      },
+    },
+  );
+
+  // 이미 올린 파일은 잔액이 줄어 있어도 저장 비용을 다시 확인하지 않고 공개 주소만 다시 본다.
+  await assert.rejects(useCase.prepareMedia(releaseId), /HTTP 404/);
+  assert.equal(ensureCalls, 0);
+  assert.equal(publishCalls, 1);
+
+  // 아직 올리지 않은 파일은 비용이 준비될 때까지 올리지 않는다.
+  uploaded = false;
+  assert.deepEqual(await useCase.prepareMedia(releaseId), {
+    releaseId,
+    status: 'RETRY',
+  });
+  assert.equal(ensureCalls, 1);
+  assert.equal(publishCalls, 1);
+});
+
 test('media preparation advances one durable IMAGE or METADATA checkpoint per call', async () => {
   const current = await fixture();
   const { releaseId, seasonId, snapshotId } = await createRelease(current.pool);
@@ -893,7 +960,8 @@ test('media preparation advances one durable IMAGE or METADATA checkpoint per ca
   const imageSha256 = createHash('sha256').update(imageBytes).digest('hex');
   await current.pool.query(
     `UPDATE season_nft_releases
-     SET image_byte_length = $2, image_sha256 = $3 WHERE id = $1`,
+     SET image_byte_length = $2, image_sha256 = $3, retry_count = 3
+     WHERE id = $1`,
     [releaseId, imageBytes.length, imageSha256],
   );
   let snapshotReads = 0;
@@ -937,14 +1005,15 @@ test('media preparation advances one durable IMAGE or METADATA checkpoint per ca
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].kind, 'IMAGE');
-  assert.equal(
+  // 단계가 넘어가면 앞 단계에서 쌓인 재시도 횟수는 0으로 돌아간다.
+  assert.deepEqual(
     (
       await current.pool.query(
-        'SELECT stage FROM season_nft_releases WHERE id = $1',
+        'SELECT stage, retry_count FROM season_nft_releases WHERE id = $1',
         [releaseId],
       )
-    ).rows[0].stage,
-    'IMAGE',
+    ).rows[0],
+    { stage: 'IMAGE', retry_count: 0 },
   );
 
   assert.deepEqual(await useCase.prepareMedia(releaseId), {

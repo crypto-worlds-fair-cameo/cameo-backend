@@ -127,6 +127,20 @@ export class UnavailableNftClaimReceiptLookup extends NftClaimReceiptLookup {
 const RETRY_BASE_MS = [5_000, 15_000, 60_000, 300_000, 900_000] as const;
 const MAX_ACTIVE_STORAGE_WORK = 20;
 const MAX_ACTIVE_USER_WORK = 100;
+/**
+ * 방금 올린 파일은 공개 주소에서 열리기까지 몇 분 걸린다. 이 시간 동안은 실패로 세지 않고
+ * 선점 간격(15초)마다 다시 확인한다. 넘기면 다른 실패처럼 간격을 늘린다.
+ */
+const MEDIA_AVAILABILITY_WAIT_MS = 600_000;
+const MAX_TRACKED_MEDIA_WAITS = 1_000;
+
+function mediaNotYetAvailable(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === 'NFT_MEDIA_NOT_AVAILABLE'
+  );
+}
 
 function nextRetryDelayMs(retryCount: number, retryAfterMs = 0): number {
   const base = RETRY_BASE_MS[Math.min(retryCount, RETRY_BASE_MS.length - 1)];
@@ -152,6 +166,8 @@ export class NftRuntimeQueue extends NftWorkerQueue {
   private readonly activeTransactions = new Set<string>();
   private readonly activeReceipts = new Set<string>();
   private readonly activeCandidates = new Set<string>();
+  /** release와 단계별로 공개 주소 확인을 처음 기다리기 시작한 시각. */
+  private readonly mediaWaits = new Map<string, number>();
   private reservedStorageWork = 0;
   private reservedUserWork = 0;
 
@@ -548,6 +564,26 @@ export class NftRuntimeQueue extends NftWorkerQueue {
         errorCode: error.errorCode,
       });
       return;
+    }
+    if (mediaNotYetAvailable(error)) {
+      const key = `${release.releaseId}:${release.stage ?? ''}`;
+      const now = Date.now();
+      const since = this.mediaWaits.get(key) ?? now;
+      if (!this.mediaWaits.has(key)) {
+        if (this.mediaWaits.size >= MAX_TRACKED_MEDIA_WAITS)
+          this.mediaWaits.clear();
+        this.mediaWaits.set(key, since);
+      }
+      if (now - since < MEDIA_AVAILABILITY_WAIT_MS) {
+        // claimDue가 이미 다음 확인 시각을 잡아 두었으므로 재시도 횟수와 대기 간격을 건드리지 않는다.
+        this.logger.log({
+          event: 'season_nft.media_pending',
+          releaseId: release.releaseId,
+          stage: release.stage,
+          waitedMs: now - since,
+        });
+        return;
+      }
     }
     const errorMessage =
       error instanceof Error ? error.message : 'Season NFT preparation failed.';

@@ -1067,6 +1067,7 @@ export class SeasonNftRepository {
            preparation_keys = $14::jsonb,
            locked_at = COALESCE(locked_at, $15),
            ready_at = COALESCE(ready_at, $16),
+           retry_count = 0,
            version = version + 1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND version = $2
          AND state = 'PREPARING' AND stage = $17

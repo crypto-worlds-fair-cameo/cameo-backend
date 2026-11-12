@@ -925,6 +925,79 @@ test('typed provider retry metadata honors service-credit five minute delay', as
   assert.ok(scheduled.retryDelayMs >= 300_000);
 });
 
+test('a file the gateway does not serve yet is rechecked without counting a retry', async () => {
+  const scheduled = [];
+  let attempts = 0;
+  const runtime = new NftRuntimeQueue(
+    { read: () => ({ enabled: true, network: 'mainnet-beta' }) },
+    {
+      claimDue: async () => [
+        {
+          releaseId: 'release',
+          seasonId: 'season',
+          state: 'PREPARING',
+          stage: 'FROZEN',
+          version: 1n,
+          retryCount: 0,
+        },
+      ],
+      rescheduleDue: async (value) => {
+        scheduled.push(value);
+      },
+    },
+    {
+      claimDueAttempts: async () => [],
+      claimDueReceipts: async () => [],
+      rescheduleAttempt: async () => {},
+      rescheduleReceipt: async () => {},
+    },
+    { claimDue: async () => [], findDispatchable: async () => null },
+    {
+      execute: async () => {},
+      prepareMedia: async () => {
+        attempts += 1;
+        const error = new Error('Permanent gateway returned HTTP 404.');
+        error.code = 'NFT_MEDIA_NOT_AVAILABLE';
+        throw error;
+      },
+    },
+    { findUnreleased: async () => [] },
+    { dispatch: async () => {}, check: async () => {} },
+    { next: async () => null },
+    { next: async () => null },
+    { lookup: async () => ({ status: 'PENDING' }) },
+    { run: async (operation) => operation({}) },
+  );
+  const scheduler = new NftRpcScheduler({ readRps: 5, sendIntervalMs: 1200 });
+  const scanOnce = async (expectedAttempts) => {
+    await runtime.scan(scheduler);
+    for (let index = 0; index < 50 && attempts < expectedAttempts; index += 1)
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    // 실패 기록은 작업이 끝난 뒤 비동기로 이어지므로 한 번 더 양보한다.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  };
+  const originalNow = Date.now;
+  const startedAt = originalNow();
+  try {
+    Date.now = () => startedAt;
+    await scanOnce(1);
+    Date.now = () => startedAt + 599_000;
+    await scanOnce(2);
+    assert.equal(attempts, 2);
+    assert.deepEqual(scheduled, []);
+
+    // 10분이 지나도 열리지 않으면 다른 실패처럼 재시도 횟수와 간격을 늘린다.
+    Date.now = () => startedAt + 600_000;
+    await scanOnce(3);
+    assert.equal(attempts, 3);
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0].releaseId, 'release');
+    assert.match(scheduled[0].errorMessage, /HTTP 404/);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('typed permanent provider failure blocks a release instead of retrying forever', async () => {
   let blocked;
   let rescheduled = 0;
