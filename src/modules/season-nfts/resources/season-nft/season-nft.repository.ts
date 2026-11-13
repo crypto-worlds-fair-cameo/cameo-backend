@@ -1227,21 +1227,30 @@ export class SeasonNftRepository {
       return rows.rows.length > 0;
     };
     const versionMatches = BigInt(release.version) === input.expectedVersion;
-    // 참가자 명단은 고정됐지만 아직 체인에 올리기 전이면 수량만 바꾼다.
+    // 참가자 명단은 고정됐지만 아직 서명 전이면 수량을 바꾼다.
+    // 컬렉션 주소가 미리 저장돼 있어도, 그 주소의 거래가 옛 수량을 담으므로 준비 거래를 버린다.
     if (
       versionMatches &&
       release.supply !== null &&
       release.eligible_count !== null &&
-      release.collection_address === null &&
-      release.state === 'PREPARING'
+      release.state === 'PREPARING' &&
+      BigInt(release.creator_minted_count) === 0n
     ) {
       if (await signed()) return { updated: false };
+      if (release.collection_address !== null) {
+        await executor.query(
+          `UPDATE season_nft_transactions
+           SET state = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
+           WHERE release_id = $1 AND state = 'PREPARED'`,
+          [input.releaseId],
+        );
+      }
       const result = await executor.query(
         `UPDATE season_nft_releases
          SET supply = $3, creator_wallet_address = $4,
              version = version + 1, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND version = $2
-           AND supply IS NOT NULL AND collection_address IS NULL
+           AND supply IS NOT NULL AND creator_minted_count = 0
          RETURNING id`,
         [
           input.releaseId,
@@ -1257,8 +1266,7 @@ export class SeasonNftRepository {
       versionMatches &&
       release.supply === null &&
       release.eligible_count !== null &&
-      release.collection_address === null &&
-      release.candy_machine_address === null &&
+      BigInt(release.creator_minted_count) === 0n &&
       (release.state === 'PREPARING' || release.state === 'WAITING_SNAPSHOT')
     ) {
       if (await signed()) return { updated: false };
@@ -1298,13 +1306,16 @@ export class SeasonNftRepository {
              season_ended_at = NULL, asset_name = NULL,
              image_byte_length = NULL, image_sha256 = NULL,
              metadata_sha256 = NULL, image_uri = NULL, metadata_uri = NULL,
-             preparation_keys = '{}'::jsonb,
+             preparation_keys = CASE
+               WHEN collection_address IS NULL THEN '{}'::jsonb
+               ELSE preparation_keys
+             END,
              locked_at = NULL, ready_at = NULL, retry_count = 0,
              last_error_code = NULL, last_error_message = NULL,
              next_attempt_at = CURRENT_TIMESTAMP,
              version = version + 1, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND version = $2
-           AND supply IS NULL AND collection_address IS NULL
+           AND supply IS NULL AND creator_minted_count = 0
          RETURNING id`,
         [
           input.releaseId,

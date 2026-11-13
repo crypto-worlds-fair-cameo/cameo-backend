@@ -411,11 +411,11 @@ export class RequestSeasonNftMintUseCase {
     }
     const eligibleCount = source.eligibility.length;
     const stored = source.release?.supply ?? null;
-    // 컬렉션이 체인에 생기기 전에는 방금 고른 수량으로 견적을 다시 낸다.
-    // 참가자 명단이 고정된 뒤에도, 서명을 하기 전이면 수량을 바꿀 수 있다.
+    // 서명을 하기 전에는 방금 고른 수량으로 견적을 다시 낸다.
+    // 컬렉션 주소는 서명 전에 미리 저장되므로, 그 주소만으로 수량을 잠그지 않는다.
     const supplyLocked =
-      source.release?.collectionAddress != null ||
-      (source.release?.creatorMintedCount ?? 0n) > 0n;
+      (source.release?.creatorMintedCount ?? 0n) > 0n ||
+      (source.release?.supplyCommitted ?? false);
     const requested =
       !supplyLocked && supplyText ? this.supplyFor(source, supplyText) : null;
     const supply = requested ?? stored ?? BigInt(Math.max(eligibleCount, 1));

@@ -37,6 +37,7 @@ export type SeasonNftMintSeason = Readonly<{
     nftDescription: string | null;
     lastErrorCode: string | null;
     collectionAddress: string | null;
+    supplyCommitted: boolean;
   }> | null;
   pendingTransactions: readonly Readonly<{
     id: string;
@@ -125,11 +126,18 @@ export class SeasonNftMintQuery {
       nft_description: string | null;
       last_error_code: string | null;
       collection_address: string | null;
+      supply_committed: boolean;
     }>(
       `SELECT id, state, version::text AS version, supply::text AS supply,
               eligible_count, creator_wallet_address,
               creator_minted_count::text AS creator_minted_count,
-              nft_description, last_error_code, collection_address
+              nft_description, last_error_code, collection_address,
+              EXISTS (
+                SELECT 1 FROM season_nft_transactions t
+                WHERE t.release_id = season_nft_releases.id
+                  AND t.state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED',
+                                  'FINALIZED', 'RECONCILED')
+              ) AS supply_committed
        FROM season_nft_releases
        WHERE season_id = $1 AND network = $2`,
       [seasonId, network],
@@ -200,6 +208,7 @@ export class SeasonNftMintQuery {
             nftDescription: current.nft_description,
             lastErrorCode: current.last_error_code,
             collectionAddress: current.collection_address,
+            supplyCommitted: current.supply_committed,
           }
         : null,
       pendingTransactions: pendingRows.map((row) => ({
