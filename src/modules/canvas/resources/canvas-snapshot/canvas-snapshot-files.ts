@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { constants, promises as fs } from 'node:fs';
 import { Injectable } from '@nestjs/common';
@@ -13,6 +13,14 @@ import type {
 export const MAX_SNAPSHOT_IMAGE_BYTES = 64 * 1024 * 1024;
 export const MAX_SNAPSHOT_CONTINUATION_BYTES = 8 * 1024 * 1024;
 export const MAX_SNAPSHOT_CONTINUATION_ENTRIES = 10_000;
+/** 원본 옆에 두는 축소 그림 파일 이름. 첫 화면용(중간)과 목록용(작은) 두 가지다. */
+export const SNAPSHOT_PREVIEW_FILE = 'preview.webp';
+export const SNAPSHOT_THUMBNAIL_FILE = 'thumbnail.webp';
+export const MAX_SNAPSHOT_PREVIEW_BYTES = 16 * 1024 * 1024;
+export const MAX_SNAPSHOT_THUMBNAIL_BYTES = 2 * 1024 * 1024;
+const MAX_REMEMBERED_DERIVATIVES = 5_000;
+const SNAPSHOT_IMAGE_KEY_PATTERN =
+  /^(snapshots\/(?:main|seasons)\/[0-9a-f-]{36}\/[0-9a-f-]{36})\/image\.png$/;
 const ORPHAN_RETENTION_MS = 24 * 60 * 60 * 1000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
