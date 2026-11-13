@@ -135,6 +135,8 @@ export class SeasonNftMintQuery {
               EXISTS (
                 SELECT 1 FROM season_nft_transactions t
                 WHERE t.release_id = season_nft_releases.id
+                  AND t.kind IN ('SETUP_MACHINE', 'SETUP_GUARD', 'SETUP_LOCK',
+                                 'SETUP_CREATOR_MINT', 'USER_PROOF', 'USER_MINT')
                   AND t.state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED',
                                   'FINALIZED', 'RECONCILED')
               ) AS supply_committed

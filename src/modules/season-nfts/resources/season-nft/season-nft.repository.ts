@@ -1215,11 +1215,25 @@ export class SeasonNftRepository {
   ): Promise<Readonly<{ updated: boolean }>> {
     const executor = getPgExecutor(this.pool, transaction);
     const release = await this.lockRelease(input.releaseId, transaction);
-    const signed = async () => {
+    const supplySigned = async () => {
       const rows = await executor.query(
         `SELECT 1
          FROM season_nft_transactions
          WHERE release_id = $1
+           AND kind IN ('SETUP_MACHINE', 'SETUP_GUARD', 'SETUP_LOCK',
+                        'SETUP_CREATOR_MINT', 'USER_PROOF', 'USER_MINT')
+           AND state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED', 'FINALIZED', 'RECONCILED')
+         LIMIT 1`,
+        [input.releaseId],
+      );
+      return rows.rows.length > 0;
+    };
+    const chainSigned = async () => {
+      const rows = await executor.query(
+        `SELECT 1
+         FROM season_nft_transactions
+         WHERE release_id = $1
+           AND kind <> 'SETUP_STORAGE_FUND'
            AND state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED', 'FINALIZED', 'RECONCILED')
          LIMIT 1`,
         [input.releaseId],
@@ -1227,8 +1241,7 @@ export class SeasonNftRepository {
       return rows.rows.length > 0;
     };
     const versionMatches = BigInt(release.version) === input.expectedVersion;
-    // 참가자 명단은 고정됐지만 아직 서명 전이면 수량을 바꾼다.
-    // 컬렉션 주소가 미리 저장돼 있어도, 그 주소의 거래가 옛 수량을 담으므로 준비 거래를 버린다.
+    // 파일 저장 비용이나 컬렉션만 끝났고 발행 장치 서명 전이면 수량을 바꾼다.
     if (
       versionMatches &&
       release.supply !== null &&
@@ -1236,18 +1249,20 @@ export class SeasonNftRepository {
       release.state === 'PREPARING' &&
       BigInt(release.creator_minted_count) === 0n
     ) {
-      if (await signed()) return { updated: false };
-      if (release.collection_address !== null) {
-        await executor.query(
-          `UPDATE season_nft_transactions
-           SET state = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
-           WHERE release_id = $1 AND state = 'PREPARED'`,
-          [input.releaseId],
-        );
-      }
+      if (await supplySigned()) return { updated: false };
+      await executor.query(
+        `UPDATE season_nft_transactions
+         SET state = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
+         WHERE release_id = $1 AND state = 'PREPARED'
+           AND kind IN ('SETUP_MACHINE', 'SETUP_GUARD', 'SETUP_LOCK', 'SETUP_CREATOR_MINT')`,
+        [input.releaseId],
+      );
       const result = await executor.query(
         `UPDATE season_nft_releases
          SET supply = $3, creator_wallet_address = $4,
+             retry_count = 0,
+             last_error_code = NULL, last_error_message = NULL,
+             next_attempt_at = CURRENT_TIMESTAMP,
              version = version + 1, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND version = $2
            AND supply IS NOT NULL AND creator_minted_count = 0
@@ -1269,7 +1284,7 @@ export class SeasonNftRepository {
       BigInt(release.creator_minted_count) === 0n &&
       (release.state === 'PREPARING' || release.state === 'WAITING_SNAPSHOT')
     ) {
-      if (await signed()) return { updated: false };
+      if (await chainSigned()) return { updated: false };
       const claimed = await executor.query(
         `SELECT 1
          FROM season_nft_claims
@@ -1340,16 +1355,8 @@ export class SeasonNftRepository {
             SeasonNftInternalErrorCodes.SupplyBelowEligible));
     if (!editable) return { updated: false };
     if (preparing) {
-      // 아직 서명되지 않은 준비 거래만 있을 때 수량을 바꾼다. 서명이 있으면 수량을 유지한다.
-      const signed = await executor.query(
-        `SELECT 1
-         FROM season_nft_transactions
-         WHERE release_id = $1
-           AND state IN ('SIGNED', 'SUBMITTED', 'CONFIRMED', 'FINALIZED', 'RECONCILED')
-         LIMIT 1`,
-        [input.releaseId],
-      );
-      if (signed.rows.length > 0) return { updated: false };
+      // 체인 설정 서명이 있으면 수량을 유지하고, 파일 저장 비용만 끝났으면 수량을 바꾼다.
+      if (await chainSigned()) return { updated: false };
       await executor.query(
         `UPDATE season_nft_transactions
          SET state = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
