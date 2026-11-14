@@ -108,6 +108,8 @@ export type ListCanvasHistoryInput = Readonly<{
 export type CanvasHistoryItem = Readonly<{
   id: string;
   imageUrl: string;
+  previewUrl: string | null;
+  thumbnailUrl: string | null;
   width: number;
   height: number;
   capturedAt: Date;
@@ -151,7 +153,7 @@ export class ListCanvasHistoryUseCase {
       throw new BusinessError(ErrorCodes.BadRequest);
     }
 
-    return this.transactions.run(async (transaction) => {
+    const page = await this.transactions.run(async (transaction) => {
       // 잘못되거나 사용할 수 없는 쿠키는 공개 조회를 막지 않는다.
       const authentication = await this.authenticator.authenticate(
         token,
@@ -177,28 +179,35 @@ export class ListCanvasHistoryUseCase {
         throw new BusinessError(ErrorCodes.CanvasNotFound);
       }
 
-      const pageRecords = page.records.slice(0, input.limit);
-      const hasNext = page.records.length > input.limit;
-      const last = pageRecords.at(-1);
-      return {
-        items: pageRecords.map((record) => ({
-          id: record.id,
-          imageUrl: this.snapshotFiles.publicUrl(record.imageKey),
-          width: record.width,
-          height: record.height,
-          capturedAt: record.capturedAt,
-          isFinal: record.isFinal,
-        })),
-        nextCursor:
-          hasNext && last
-            ? encodeCanvasHistoryCursor({
-                canvasId,
-                capturedAt: last.cursorCapturedAt,
-                id: last.id,
-              })
-            : null,
-        hasNext,
-      };
+      return page;
     });
+
+    const pageRecords = page.records.slice(0, input.limit);
+    const hasNext = page.records.length > input.limit;
+    const last = pageRecords.at(-1);
+    // 축소 그림 파일 확인은 DB 트랜잭션을 붙잡지 않도록 조회가 끝난 뒤에 한다.
+    const items = await Promise.all(
+      pageRecords.map(async (record) => ({
+        id: record.id,
+        imageUrl: this.snapshotFiles.publicUrl(record.imageKey),
+        ...(await this.snapshotFiles.derivativeUrls(record.imageKey)),
+        width: record.width,
+        height: record.height,
+        capturedAt: record.capturedAt,
+        isFinal: record.isFinal,
+      })),
+    );
+    return {
+      items,
+      nextCursor:
+        hasNext && last
+          ? encodeCanvasHistoryCursor({
+              canvasId,
+              capturedAt: last.cursorCapturedAt,
+              id: last.id,
+            })
+          : null,
+      hasNext,
+    };
   }
 }

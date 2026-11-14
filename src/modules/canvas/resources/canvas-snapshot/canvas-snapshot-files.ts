@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import type { AllConfigType } from '../../../../config/config.type';
 import type { CanvasTarget } from '../canvas-definition/canvas-target';
 import type {
+  CanvasSnapshotDerivativeImages,
   CanvasSnapshotFileResult,
   CanvasSnapshotRecord,
 } from './canvas-snapshot';
@@ -52,6 +53,8 @@ export class CanvasSnapshotFiles {
   private initialization?: Promise<void>;
   private usageBytes?: bigint;
   private pendingWriteBytes = 0n;
+  /** 축소 그림 두 개를 확인한 스냅샷 디렉터리. 한번 생긴 파일은 바뀌지 않아 다시 찾지 않는다. */
+  private readonly derivativeDirectories = new Set<string>();
 
   constructor(private readonly config: ConfigService<AllConfigType>) {}
 
@@ -210,7 +213,10 @@ export class CanvasSnapshotFiles {
     await this.refreshUsage();
   }
 
-  /** 검증한 PNG와 상태 JSON을 임시 디렉터리에 쓴 뒤 같은 볼륨의 최종 경로로 원자적으로 이동한다. */
+  /**
+   * 검증한 PNG와 상태 JSON을 임시 디렉터리에 쓴 뒤 같은 볼륨의 최종 경로로 원자적으로 이동한다.
+   * 축소 그림을 받으면 같은 디렉터리에 넣어 원본과 함께 공개한다.
+   */
   async publish(
     target: CanvasTarget,
     id: string,
@@ -219,6 +225,7 @@ export class CanvasSnapshotFiles {
     image: Buffer,
     continuation: Buffer,
     capturedAt: Date,
+    derivatives?: CanvasSnapshotDerivativeImages,
   ): Promise<CanvasSnapshotFileResult> {
     await this.requireInitialized();
     this.assertIdentity(
@@ -236,6 +243,7 @@ export class CanvasSnapshotFiles {
       throughSequence,
       rendererVersion,
     );
+    if (derivatives) this.assertDerivatives(derivatives);
     const directoryKey = this.directoryKey(target, id);
     const imageKey = `${directoryKey}/image.png`;
     const continuationKey = `${directoryKey}/continuation.json`;
@@ -267,7 +275,12 @@ export class CanvasSnapshotFiles {
     }
 
     // 새 시도만 캐시 예산과 실제 여유 공간을 예약한다. 실패 예약은 다음 주기 재계산까지 보수적으로 유지한다.
-    const reservedBytes = image.byteLength + continuation.byteLength;
+    const reservedBytes =
+      image.byteLength +
+      continuation.byteLength +
+      (derivatives
+        ? derivatives.preview.byteLength + derivatives.thumbnail.byteLength
+        : 0);
     await this.reserveCapacity(reservedBytes);
     try {
       const temporaryDirectory = this.resolveTemporary(id);
@@ -279,11 +292,24 @@ export class CanvasSnapshotFiles {
             path.join(temporaryDirectory, 'continuation.json'),
             continuation,
           ),
+          ...(derivatives
+            ? [
+                this.writeAndSync(
+                  path.join(temporaryDirectory, SNAPSHOT_PREVIEW_FILE),
+                  derivatives.preview,
+                ),
+                this.writeAndSync(
+                  path.join(temporaryDirectory, SNAPSHOT_THUMBNAIL_FILE),
+                  derivatives.thumbnail,
+                ),
+              ]
+            : []),
         ]);
         await this.syncDirectory(temporaryDirectory);
-        // rename은 동일 저장 루트 안에서만 수행해 두 파일이 함께 보이도록 한다.
+        // rename은 동일 저장 루트 안에서만 수행해 모든 파일이 함께 보이도록 한다.
         await fs.rename(temporaryDirectory, finalDirectory);
         await this.syncDirectory(finalParent);
+        if (derivatives) this.rememberDerivatives(directoryKey);
         return result;
       } catch (error: unknown) {
         await fs.rm(temporaryDirectory, { recursive: true, force: true });
@@ -294,10 +320,85 @@ export class CanvasSnapshotFiles {
     }
   }
 
+  /** 축소 그림 두 개가 모두 있는 스냅샷인지 확인한다. */
+  async hasDerivatives(imageKey: string): Promise<boolean> {
+    const directoryKey = this.derivativeDirectoryKey(imageKey);
+    return directoryKey !== undefined && this.hasDerivativeFiles(directoryKey);
+  }
+
+  /**
+   * 축소 그림 두 개가 모두 있을 때만 공개 주소를 돌려준다.
+   * 예전 스냅샷은 채워지기 전까지, 그리고 파일을 확인할 수 없을 때는 null이며 화면은 원본을 쓴다.
+   */
+  async derivativeUrls(
+    imageKey: string,
+  ): Promise<
+    Readonly<{ previewUrl: string | null; thumbnailUrl: string | null }>
+  > {
+    const directoryKey = this.derivativeDirectoryKey(imageKey);
+    let available = false;
+    try {
+      available =
+        directoryKey !== undefined &&
+        (await this.hasDerivativeFiles(directoryKey));
+    } catch {
+      // 보조 파일 확인 실패가 공개 조회를 막지 않게 한다.
+      available = false;
+    }
+    if (!directoryKey || !available)
+      return { previewUrl: null, thumbnailUrl: null };
+    return {
+      previewUrl: this.publicUrl(`${directoryKey}/${SNAPSHOT_PREVIEW_FILE}`),
+      thumbnailUrl: this.publicUrl(
+        `${directoryKey}/${SNAPSHOT_THUMBNAIL_FILE}`,
+      ),
+    };
+  }
+
+  /**
+   * 이미 공개된 스냅샷 디렉터리에 축소 그림을 채운다.
+   * 파일마다 임시 경로에 다 쓴 뒤 옮겨, 반쯤 쓴 파일이 공개 경로에 보이지 않게 한다.
+   */
+  async saveDerivatives(
+    imageKey: string,
+    derivatives: CanvasSnapshotDerivativeImages,
+  ): Promise<void> {
+    await this.requireInitialized();
+    const directoryKey = this.derivativeDirectoryKey(imageKey);
+    if (!directoryKey) throw new Error('Canvas snapshot image key is invalid.');
+    this.assertDerivatives(derivatives);
+    const finalDirectory = this.resolveKey(directoryKey);
+    await this.assertExistingDirectoryInsideRoot(finalDirectory);
+    const reservedBytes =
+      derivatives.preview.byteLength + derivatives.thumbnail.byteLength;
+    await this.reserveCapacity(reservedBytes);
+    try {
+      const temporaryDirectory = this.resolveTemporary(randomUUID());
+      await fs.mkdir(temporaryDirectory, { recursive: false });
+      try {
+        const files = [
+          [SNAPSHOT_PREVIEW_FILE, derivatives.preview],
+          [SNAPSHOT_THUMBNAIL_FILE, derivatives.thumbnail],
+        ] as const;
+        for (const [name, bytes] of files) {
+          const temporaryFile = path.join(temporaryDirectory, name);
+          await this.writeAndSync(temporaryFile, bytes);
+          await fs.rename(temporaryFile, path.join(finalDirectory, name));
+        }
+        await this.syncDirectory(finalDirectory);
+      } finally {
+        await fs.rm(temporaryDirectory, { recursive: true, force: true });
+      }
+    } finally {
+      this.pendingWriteBytes -= BigInt(reservedBytes);
+    }
+    this.rememberDerivatives(directoryKey);
+  }
+
   /** 상대 key를 설정한 공개 URL의 경로 접두사 뒤에 결합한다. */
   publicUrl(key: string): string {
     if (
-      !/^snapshots\/(main|seasons)\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/(image\.png|continuation\.json)$/.test(
+      !/^snapshots\/(main|seasons)\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/(image\.png|continuation\.json|preview\.webp|thumbnail\.webp)$/.test(
         key,
       )
     )
@@ -354,8 +455,10 @@ export class CanvasSnapshotFiles {
           if (stat.mtimeMs > cutoff) continue;
           const key = `snapshots/${scope}/${canvasEntry.name}/${snapshotEntry.name}`;
           // DB 조회 오류가 나면 callback이 throw하며 파일을 그대로 보존한다.
-          if (!(await isReferenced(key)))
+          if (!(await isReferenced(key))) {
             await fs.rm(directory, { recursive: true, force: true });
+            this.derivativeDirectories.delete(key);
+          }
         }
       }
     }
@@ -455,6 +558,62 @@ export class CanvasSnapshotFiles {
       throw new Error(
         'Canvas snapshot PNG dimensions do not match its canvas.',
       );
+  }
+
+  /** 축소 그림은 크기 한도 안의 WebP 파일만 받는다. */
+  private assertDerivatives(derivatives: CanvasSnapshotDerivativeImages): void {
+    const files = [
+      [derivatives.preview, MAX_SNAPSHOT_PREVIEW_BYTES],
+      [derivatives.thumbnail, MAX_SNAPSHOT_THUMBNAIL_BYTES],
+    ] as const;
+    for (const [bytes, maximum] of files) {
+      if (
+        bytes.byteLength < 12 ||
+        bytes.byteLength > maximum ||
+        bytes.toString('ascii', 0, 4) !== 'RIFF' ||
+        bytes.toString('ascii', 8, 12) !== 'WEBP'
+      )
+        throw new Error('Canvas snapshot derivative image is invalid.');
+    }
+  }
+
+  /** 원본 PNG key에서 스냅샷 디렉터리 key를 얻는다. 형식이 다르면 undefined다. */
+  private derivativeDirectoryKey(imageKey: string): string | undefined {
+    return SNAPSHOT_IMAGE_KEY_PATTERN.exec(imageKey)?.[1];
+  }
+
+  private async hasDerivativeFiles(directoryKey: string): Promise<boolean> {
+    if (this.derivativeDirectories.has(directoryKey)) return true;
+    // 기능이 꺼져 있으면 저장 루트를 준비하지 않으므로 파일도 찾지 않는다.
+    if (!this.enabled) return false;
+    await this.initialize();
+    const files = [
+      [SNAPSHOT_PREVIEW_FILE, MAX_SNAPSHOT_PREVIEW_BYTES],
+      [SNAPSHOT_THUMBNAIL_FILE, MAX_SNAPSHOT_THUMBNAIL_BYTES],
+    ] as const;
+    for (const [name, maximum] of files) {
+      try {
+        // symlink는 따라가지 않고 없는 파일로 본다.
+        const stat = await fs.lstat(this.resolveKey(`${directoryKey}/${name}`));
+        if (!stat.isFile() || stat.size === 0 || stat.size > maximum)
+          return false;
+      } catch (error: unknown) {
+        if (this.deterministicFileValidationError(error)) return false;
+        throw error;
+      }
+    }
+    this.rememberDerivatives(directoryKey);
+    return true;
+  }
+
+  /** 확인한 디렉터리만 기억하고, 한도를 넘으면 가장 먼저 기억한 것부터 잊는다. */
+  private rememberDerivatives(directoryKey: string): void {
+    this.derivativeDirectories.delete(directoryKey);
+    this.derivativeDirectories.add(directoryKey);
+    if (this.derivativeDirectories.size > MAX_REMEMBERED_DERIVATIVES) {
+      const oldest = this.derivativeDirectories.values().next().value;
+      if (oldest !== undefined) this.derivativeDirectories.delete(oldest);
+    }
   }
 
   private assertContinuation(

@@ -21,7 +21,8 @@ async function loadHistory(canvasId: string, cursor?: string) {
 }
 
 const first = await loadHistory(canvasId);
-// items의 imageUrl을 이미지로 표시하고 capturedAt을 사용자 시간대로 표시한다.
+// 목록 카드는 thumbnailUrl, 크게 보기는 previewUrl을 표시하고 값이 null이면 imageUrl을 쓴다.
+// 원본 imageUrl은 다운로드에 쓰고, capturedAt은 사용자 시간대로 표시한다.
 renderHistory(first.items);
 
 if (first.hasNext) {

@@ -46,8 +46,29 @@ export class CanvasHistoryItemResponse {
   @ApiProperty({ format: 'uuid', description: '스냅샷 ID.' })
   id!: string;
 
-  @ApiProperty({ format: 'uri', description: '스냅샷 PNG 공개 URL.' })
+  @ApiProperty({
+    format: 'uri',
+    description: '원본 크기 스냅샷 PNG 공개 URL. 다운로드에 사용합니다.',
+  })
   imageUrl!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'uri',
+    nullable: true,
+    description:
+      '긴 변이 최대 2048px인 WebP 공개 URL. 크게 보기와 첫 화면에 사용합니다. 아직 만들어지지 않았으면 null이며 imageUrl을 사용합니다.',
+  })
+  previewUrl!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uri',
+    nullable: true,
+    description:
+      '긴 변이 최대 768px인 WebP 공개 URL. 목록 카드에 사용합니다. 아직 만들어지지 않았으면 null이며 imageUrl을 사용합니다.',
+  })
+  thumbnailUrl!: string | null;
 
   @ApiProperty({ type: 'integer', minimum: 1, description: '이미지 너비(px).' })
   width!: number;
@@ -89,6 +110,8 @@ function toCanvasHistoryResponse(
     items: page.items.map((item) => ({
       id: item.id,
       imageUrl: item.imageUrl,
+      previewUrl: item.previewUrl,
+      thumbnailUrl: item.thumbnailUrl,
       width: item.width,
       height: item.height,
       capturedAt: item.capturedAt.toISOString(),

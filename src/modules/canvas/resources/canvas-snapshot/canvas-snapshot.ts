@@ -34,6 +34,12 @@ export type CanvasSnapshotRecord = Readonly<{
   createdAt: Date;
 }>;
 
+/** 원본 PNG 옆에 두는 축소 그림. preview는 첫 화면용(중간), thumbnail은 목록용(작은) WebP다. */
+export type CanvasSnapshotDerivativeImages = Readonly<{
+  preview: Buffer;
+  thumbnail: Buffer;
+}>;
+
 export type CanvasSnapshotFileResult = Readonly<{
   imageKey: string;
   continuationKey: string;

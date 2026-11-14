@@ -13,8 +13,11 @@ import type { CanvasTarget } from '../canvas-definition/canvas-target';
 import { CanvasSnapshotRepository } from './canvas-snapshot.repository';
 import {
   CanvasSnapshotPublicationRejected,
+  type CanvasSnapshotDerivativeImages,
   type CanvasSnapshotPublishInput,
+  type CanvasSnapshotRecord,
 } from './canvas-snapshot';
+import { CanvasSnapshotDerivativeRenderer } from './canvas-snapshot-derivative-renderer';
 import { CanvasSnapshotFiles } from './canvas-snapshot-files';
 import {
   CanvasSnapshotRenderer,
@@ -50,6 +53,7 @@ export class CanvasSnapshotRunner
     private readonly files: CanvasSnapshotFiles,
     private readonly renderer: CanvasSnapshotRenderer,
     private readonly logger: LoggerService,
+    private readonly derivatives: CanvasSnapshotDerivativeRenderer,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -217,6 +221,8 @@ export class CanvasSnapshotRunner
         }),
       );
       if (this.closing) return;
+      const derivatives = await this.renderDerivatives(result.image, target.id);
+      if (this.closing) return;
       const output = await this.files.publish(
         target,
         id,
@@ -225,6 +231,7 @@ export class CanvasSnapshotRunner
         result.image,
         continuation,
         capturedAt,
+        derivatives,
       );
       if (this.closing) return;
       this.publication = {
@@ -249,6 +256,39 @@ export class CanvasSnapshotRunner
     } finally {
       this.activeId = undefined;
     }
+  }
+
+  /**
+   * 첫 화면용·목록용 축소 그림을 만든다.
+   * 화면을 빠르게 하는 보조 파일이므로 만들지 못해도 원본 공개는 막지 않고 undefined를 돌려준다.
+   */
+  private async renderDerivatives(
+    image: Buffer,
+    canvasId: string,
+  ): Promise<CanvasSnapshotDerivativeImages | undefined> {
+    try {
+      return await this.derivatives.render(image);
+    } catch (error) {
+      this.logger.warn('Canvas snapshot derivatives failed', {
+        event: 'canvas.snapshot.derivatives.failed',
+        canvasId,
+        reason: error instanceof Error ? error.message : 'Unknown failure',
+      });
+      return undefined;
+    }
+  }
+
+  /** 축소 그림 없이 공개된 스냅샷(기능 도입 전, 생성 실패)은 감사 순회에서 원본으로 채운다. */
+  private async backfillDerivatives(
+    record: CanvasSnapshotRecord,
+  ): Promise<void> {
+    if (await this.files.hasDerivatives(record.imageKey)) return;
+    const derivatives = await this.renderDerivatives(
+      await this.files.readImage(record),
+      record.canvasId,
+    );
+    if (derivatives)
+      await this.files.saveDerivatives(record.imageKey, derivatives);
   }
 
   /** 파일 공개 뒤 DB 응답을 잃으면 같은 ID를 재확인하고 같은 메타데이터만 다시 확정한다. */
@@ -285,6 +325,7 @@ export class CanvasSnapshotRunner
         try {
           if (!(await this.files.validate(record, true)))
             await this.snapshots.invalidate(record.id);
+          else await this.backfillDerivatives(record);
         } catch (error) {
           this.failure(error, record.canvasId);
         }

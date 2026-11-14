@@ -96,8 +96,20 @@ test('canvas history HTTP contract', async (t) => {
       assert.equal(first.body.data.hasNext, true);
       assert.deepEqual(
         Object.keys(first.body.data.items[0]).sort(),
-        ['id', 'imageUrl', 'width', 'height', 'capturedAt', 'isFinal'].sort(),
+        [
+          'id',
+          'imageUrl',
+          'previewUrl',
+          'thumbnailUrl',
+          'width',
+          'height',
+          'capturedAt',
+          'isFinal',
+        ].sort(),
       );
+      // 축소 그림 파일이 아직 없는 스냅샷은 주소 대신 null을 준다.
+      assert.equal(first.body.data.items[0].previewUrl, null);
+      assert.equal(first.body.data.items[0].thumbnailUrl, null);
       assert.match(
         first.body.data.items[0].imageUrl,
         /^https:\/\/assets\.example\.test\/snapshots\/main\//,

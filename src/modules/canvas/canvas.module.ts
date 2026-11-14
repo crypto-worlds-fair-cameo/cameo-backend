@@ -16,6 +16,7 @@ import { CanvasChunkRepository } from './resources/canvas-drawing/canvas-chunk.r
 import { CanvasDefinition } from './resources/canvas-definition/canvas-definition';
 import { CanvasRuntimeRegistry } from './resources/canvas-drawing/canvas-runtime-registry';
 import { SeasonCanvasQuery } from './resources/canvas-access/season-canvas-query';
+import { CanvasSnapshotDerivativeRenderer } from './resources/canvas-snapshot/canvas-snapshot-derivative-renderer';
 import { CanvasSnapshotFiles } from './resources/canvas-snapshot/canvas-snapshot-files';
 import { CanvasSnapshotRenderer } from './resources/canvas-snapshot/canvas-snapshot-renderer';
 import { CanvasSnapshotRunner } from './resources/canvas-snapshot/canvas-snapshot-runner';
@@ -38,6 +39,7 @@ import { FinalCanvasSnapshotReader } from './resources/canvas-snapshot/final-can
     CanvasChunkRepository,
     CanvasSnapshotRepository,
     CanvasSnapshotFiles,
+    CanvasSnapshotDerivativeRenderer,
     CanvasSnapshotRenderer,
     CanvasSnapshotRunner,
     FinalCanvasSnapshotReader,
